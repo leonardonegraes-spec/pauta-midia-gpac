@@ -438,11 +438,16 @@ const firebaseConfig = {
 };
 
 let fdb = null;
-try {
-  const app = initializeApp(firebaseConfig);
-  fdb = getFirestore(app);
-} catch (e) {
-  console.error("Firebase não configurado:", e);
+var firebaseConfigured = Object.values(firebaseConfig).every(function(v){ return String(v).indexOf("COLE_AQUI") === -1; });
+if (firebaseConfigured) {
+  try {
+    const app = initializeApp(firebaseConfig);
+    fdb = getFirestore(app);
+  } catch (e) {
+    console.error("Erro ao iniciar o Firebase:", e);
+  }
+} else {
+  console.warn("Firebase não configurado — cole os valores reais em firebaseConfig no topo do arquivo.");
 }
 
 (function(){
@@ -1017,6 +1022,11 @@ try {
     }
     try {
       await seedIfEmpty();
+      var check = await getDocs(collection(fdb, "demandas"));
+      if (check.empty) {
+        showBanner("O Firebase respondeu, mas os dados não foram salvos — confira as regras do Firestore (veja LEIA-ME.md). Trabalhando localmente nesta sessão.");
+        return;
+      }
       state.dbAvailable = true;
       onSnapshot(collection(fdb, "planos"), function(snap){
         var planos = {};
