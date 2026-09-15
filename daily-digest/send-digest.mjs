@@ -72,7 +72,7 @@ function escapeHtml(s) {
 
 function buildIndividualHtml(person, items, planos, today) {
   if (!items.length) {
-    return `<p style="color:#666B58;font-size:13px;">Nenhuma pendência sua até o fim desta semana. 🎉</p>`;
+    return `<p style="color:#666B58;font-size:13px;line-height:1.6;">Nenhuma pendência sua até o fim desta semana. 🎉</p>`;
   }
   const rows = items.map((d) => {
     const dias = daysDiff(d.date, today);
@@ -82,36 +82,38 @@ function buildIndividualHtml(person, items, planos, today) {
     const pracas = campanhaPracas(d, planos).join(", ");
     return `
       <tr>
-        <td style="padding:10px 12px;border-bottom:1px solid #E4E6DC;">
-          <div style="font-weight:700;color:#21241B;font-size:14px;">${escapeHtml(d.title)}</div>
-          ${campanha ? `<div style="color:#52690E;font-size:12px;font-weight:700;margin-top:2px;">${escapeHtml(campanha)}</div>` : ""}
-          ${pracas ? `<div style="color:#666B58;font-size:12px;margin-top:2px;">${escapeHtml(pracas)}</div>` : ""}
+        <td style="padding:16px 14px;border-bottom:1px solid #E4E6DC;">
+          <div style="font-weight:700;color:#21241B;font-size:14px;line-height:1.4;">${escapeHtml(d.title)}</div>
+          ${campanha ? `<div style="color:#52690E;font-size:12px;font-weight:700;margin-top:5px;">${escapeHtml(campanha)}</div>` : ""}
+          ${pracas ? `<div style="color:#666B58;font-size:12px;margin-top:4px;line-height:1.5;">${escapeHtml(pracas)}</div>` : ""}
         </td>
-        <td style="padding:10px 12px;border-bottom:1px solid #E4E6DC;text-align:right;white-space:nowrap;">
+        <td style="padding:16px 14px;border-bottom:1px solid #E4E6DC;text-align:right;white-space:nowrap;vertical-align:top;">
           <div style="color:${color};font-weight:700;font-size:13px;">${prazoTexto(dias)}</div>
-          <div style="color:#9BA089;font-size:11px;">${formatPrazo(d.date)}</div>
-          <div style="color:#666B58;font-size:11px;margin-top:2px;">${STATUS_LABEL[d.status] || "Pendente"}</div>
+          <div style="color:#9BA089;font-size:11px;margin-top:4px;">${formatPrazo(d.date)}</div>
+          <div style="color:#666B58;font-size:11px;margin-top:4px;">${STATUS_LABEL[d.status] || "Pendente"}</div>
         </td>
       </tr>`;
   }).join("");
   return `<table style="width:100%;border-collapse:collapse;">${rows}</table>`;
 }
 
-function statusBlockHtml(label, color, items, planos) {
+function statusBlockHtml(label, color, bgColor, items, planos) {
   if (!items.length) return "";
   items.sort((a, b) => a.date.localeCompare(b.date));
   const rows = items.map((d) => {
     const campanha = campanhaLabel(d, planos);
     return `
       <tr>
-        <td style="padding:4px 10px 4px 0;font-size:12px;color:#52690E;font-weight:700;white-space:nowrap;">${escapeHtml(campanha || "—")}</td>
-        <td style="padding:4px 10px;font-size:12px;color:#21241B;">${escapeHtml(d.title)}</td>
-        <td style="padding:4px 0;font-size:12px;color:#666B58;text-align:right;white-space:nowrap;">${formatPrazo(d.date)}</td>
+        <td style="padding:10px 12px;border-bottom:1px solid #ECEEE5;font-size:12.5px;color:#52690E;font-weight:700;white-space:nowrap;vertical-align:top;">${escapeHtml(campanha || "—")}</td>
+        <td style="padding:10px 12px;border-bottom:1px solid #ECEEE5;font-size:12.5px;color:#21241B;line-height:1.5;vertical-align:top;">${escapeHtml(d.title)}</td>
+        <td style="padding:10px 12px;border-bottom:1px solid #ECEEE5;font-size:12.5px;color:#666B58;text-align:right;white-space:nowrap;vertical-align:top;">${formatPrazo(d.date)}</td>
       </tr>`;
   }).join("");
   return `
-    <tr><td colspan="3" style="font-size:10.5px;color:${color};text-transform:uppercase;font-weight:700;letter-spacing:.3px;padding:8px 0 2px;">${label}</td></tr>
-    ${rows}`;
+    <div style="margin-top:14px;">
+      <div style="display:inline-block;background:${bgColor};color:${color};font-size:10.5px;text-transform:uppercase;font-weight:700;letter-spacing:.4px;padding:4px 10px;border-radius:10px;margin-bottom:8px;">${label}</div>
+      <table style="width:100%;border-collapse:collapse;">${rows}</table>
+    </div>`;
 }
 
 function buildTeamSummaryHtml(weekDemandas, planos) {
@@ -134,30 +136,31 @@ function buildTeamSummaryHtml(weekDemandas, planos) {
   const sections = Object.entries(byPerson).map(([name, c]) => {
     const hasItems = c.pendente.length || c.producao.length;
     const body = hasItems
-      ? `<table style="width:100%;border-collapse:collapse;">${statusBlockHtml("Pendente", "#8C6208", c.pendente, planos)}${statusBlockHtml("Em produção", "#2160C4", c.producao, planos)}</table>`
-      : `<p style="color:#9BA089;font-size:12px;margin:2px 0 0;">Sem pendências nesta semana.</p>`;
+      ? `${statusBlockHtml("Pendente", "#8C6208", "#F5EED9", c.pendente, planos)}${statusBlockHtml("Em produção", "#2160C4", "#E3EDFB", c.producao, planos)}`
+      : `<p style="color:#9BA089;font-size:12.5px;margin:0;">Sem pendências nesta semana.</p>`;
     return `
-      <div style="margin-bottom:16px;">
-        <div style="font-weight:700;color:#21241B;font-size:14px;border-bottom:2px solid #E4E6DC;padding-bottom:3px;margin-bottom:4px;">${escapeHtml(name)}</div>
+      <div style="background:#F4F5EF;border:1px solid #E4E6DC;border-radius:12px;padding:18px 20px;margin-bottom:16px;">
+        <div style="font-weight:700;color:#21241B;font-size:15px;">${escapeHtml(name)}</div>
         ${body}
       </div>`;
   }).join("");
 
   return `
-    <h3 style="color:#21241B;font-size:15px;margin:22px 0 10px;">Total do time — esta semana</h3>
+    <h3 style="color:#21241B;font-size:16px;margin:0 0 16px;">Total do time — esta semana</h3>
     ${sections}`;
 }
 
 function buildEmailHtml(person, personItems, weekDemandas, planos, today) {
   return `
-  <div style="font-family:Arial,Helvetica,sans-serif;max-width:560px;margin:0 auto;">
-    <h2 style="color:#21241B;font-size:18px;margin-bottom:4px;">Sua pauta de hoje, ${escapeHtml(person)}</h2>
-    <p style="color:#666B58;font-size:13px;margin-top:0;">
+  <div style="font-family:Arial,Helvetica,sans-serif;max-width:600px;margin:0 auto;padding:28px 24px;background:#FAFAF7;">
+    <h2 style="color:#21241B;font-size:19px;margin:0 0 6px;">Sua pauta de hoje, ${escapeHtml(person)}</h2>
+    <p style="color:#666B58;font-size:13px;margin:0 0 20px;line-height:1.6;">
       Atrasadas + o que vence até domingo desta semana.
     </p>
     ${buildIndividualHtml(person, personItems, planos, today)}
+    <div style="border-top:1px solid #E4E6DC;margin:32px 0 24px;"></div>
     ${buildTeamSummaryHtml(weekDemandas, planos)}
-    <p style="color:#9BA089;font-size:11px;margin-top:18px;">
+    <p style="color:#9BA089;font-size:11px;margin-top:24px;">
       Board completo: https://leonardonegraes-spec.github.io/pauta-midia-gpac/
     </p>
   </div>`;
