@@ -384,6 +384,44 @@
   .pr-pracas { color: var(--text2); }
   .pr-status { flex: none; display: flex; align-items: center; gap: 5px; font-size: 11px; color: var(--text2); white-space: nowrap; }
 
+  /* ---------- Autorizações de mídia (pendências, planilha externa somente leitura) ---------- */
+  .auth-view { display: flex; flex-direction: column; }
+  .auth-filter-bar { display: flex; gap: 10px; margin-bottom: 14px; flex-wrap: wrap; }
+  .auth-filter-bar input[type="text"] {
+    flex: 1; min-width: 220px; background: var(--surface2); border: 1px solid var(--border); color: var(--text);
+    border-radius: 8px; padding: 9px 12px; font-size: 13px;
+  }
+  .au-sync-note { color: var(--text3); font-size: 11px; margin-bottom: 10px; text-align: right; }
+  .auth-list {
+    display: flex; flex-direction: column; background: var(--surface); border: 1px solid var(--border);
+    border-radius: 10px; overflow: hidden;
+  }
+  .auth-row {
+    display: flex; align-items: flex-start; gap: 12px; padding: 13px 16px;
+    border-bottom: 1px solid var(--border-soft); cursor: pointer; transition: background .12s;
+  }
+  .auth-row:last-child { border-bottom: none; }
+  .auth-row:hover { background: var(--surface2); }
+  .auth-row.late { background: #FBF1EF; }
+  .auth-row.late:hover { background: #F7E9E6; }
+  .au-main { flex: 1; min-width: 0; }
+  .au-title { font-weight: 700; font-size: 13.5px; color: var(--accent); }
+  .au-meta {
+    display: flex; gap: 8px; align-items: center; margin-top: 3px; font-size: 11.5px;
+    color: var(--text3); flex-wrap: wrap;
+  }
+  .au-prazo { font-size: 11px; color: var(--text3); margin-top: 4px; }
+  .au-prazo.late-text { color: var(--danger); font-weight: 700; }
+  .au-badges { display: flex; gap: 6px; flex: none; flex-wrap: wrap; justify-content: flex-end; max-width: 260px; }
+  .au-badge {
+    font-size: 9.5px; font-weight: 700; letter-spacing: .2px; padding: 3px 8px; border-radius: 8px;
+    white-space: nowrap; text-transform: uppercase;
+  }
+  .au-badge.pending { background: var(--surface3); color: var(--text2); }
+  .au-badge.late { background: #F4DAD4; color: var(--danger); }
+  .auth-detail dt { color: var(--text2); font-size: 10.5px; text-transform: uppercase; letter-spacing: .4px; margin-top: 12px; }
+  .auth-detail dd { margin: 3px 0 0; font-size: 13px; color: var(--text); }
+
   @media (max-width: 720px) {
     .app { padding: 16px; }
     .stats { grid-template-columns: repeat(2, 1fr); }
@@ -437,6 +475,7 @@
   <div class="view-switch">
     <button class="view-btn active" id="btnViewCalendar">📅 Calendário</button>
     <button class="view-btn" id="btnViewList">📋 Pauta em lista</button>
+    <button class="view-btn" id="btnViewAuth">🗂️ Autorizações de mídia</button>
   </div>
 
   <div class="cal-wrap" id="calendarView">
@@ -445,6 +484,14 @@
   </div>
 
   <div class="pauta-list" id="listView" style="display:none"></div>
+
+  <div class="auth-view" id="authView" style="display:none">
+    <div class="auth-filter-bar">
+      <input type="text" id="authSearchInput" placeholder="🔍 Buscar por cliente, campanha, praça ou veículo..." />
+    </div>
+    <div class="au-sync-note" id="authSyncNote"></div>
+    <div class="auth-list" id="authList"></div>
+  </div>
 </div>
 
 <!-- Detail / create modal -->
@@ -644,7 +691,11 @@ if (firebaseConfigured) {
     statusFilter: "",
     searchQuery: "",
     editingId: null,
-    dbAvailable: false
+    dbAvailable: false,
+    view: "calendar",
+    autorizacoes: [],
+    authSearch: "",
+    authSyncInfo: null
   };
 
   // ---------------- Rendering ----------------
@@ -815,11 +866,141 @@ if (firebaseConfigured) {
     state.view = view;
     document.getElementById("btnViewCalendar").classList.toggle("active", view === "calendar");
     document.getElementById("btnViewList").classList.toggle("active", view === "list");
+    document.getElementById("btnViewAuth").classList.toggle("active", view === "auth");
     document.getElementById("calendarView").style.display = view === "calendar" ? "" : "none";
     document.getElementById("listView").style.display = view === "list" ? "" : "none";
+    document.getElementById("authView").style.display = view === "auth" ? "" : "none";
+    var pautaMode = view !== "auth";
+    document.querySelector(".stats").style.display = pautaMode ? "" : "none";
+    document.getElementById("teamRow").style.display = pautaMode ? "" : "none";
+    document.querySelector(".filter-bar").style.display = pautaMode ? "" : "none";
+    if (view === "auth") renderAuthList();
   }
   document.getElementById("btnViewCalendar").addEventListener("click", function(){ setView("calendar"); });
   document.getElementById("btnViewList").addEventListener("click", function(){ setView("list"); });
+  document.getElementById("btnViewAuth").addEventListener("click", function(){ setView("auth"); });
+
+  // ---------------- Autorizações de mídia — pendências (planilha externa, somente leitura) ----------------
+  // Espelho de uma planilha de controle de autorização de mídia (PI/AP/RM/Checking), sincronizada 1x/dia
+  // por um script fora daqui (sheet-sync). Sistema separado da pauta: coleção própria (autorizacoes), sem
+  // edição pela plataforma, sem entrar no calendário/estatísticas. Só mostra o que ainda está pendente.
+  function parseVeiculacaoInicio(v){
+    if (!v) return null;
+    var m = String(v).match(/(\d{2})\/(\d{2})\/(\d{4})/);
+    if (!m) return null;
+    return m[3] + "-" + m[2] + "-" + m[1];
+  }
+
+  function authPendencias(a){
+    var pend = [];
+    if (!a.piRecebido) pend.push("pi");
+    if (!a.apAssinada) pend.push("ap");
+    if (!a.dataEnvioMaterialRealizada) pend.push("material");
+    return pend;
+  }
+
+  function authDeadlineInfo(a){
+    var pend = authPendencias(a);
+    var candidates = [];
+    if (pend.indexOf("pi") !== -1 || pend.indexOf("ap") !== -1) {
+      var vi = parseVeiculacaoInicio(a.veiculacao);
+      if (vi) candidates.push({ ref: vi, textLate: "Veiculação começou em", textFuture: "Veiculação começa em" });
+    }
+    if (pend.indexOf("material") !== -1 && a.dataEnvioMaterialPlanejada) {
+      candidates.push({ ref: a.dataEnvioMaterialPlanejada, textLate: "Material deveria ter sido enviado em", textFuture: "Material a enviar até" });
+    }
+    if (!candidates.length) return null;
+    candidates.sort(function(x,y){ return x.ref.localeCompare(y.ref); });
+    var c = candidates[0];
+    var today = todayIso();
+    var late = c.ref < today;
+    var days = Math.abs(Math.round((parseIso(today) - parseIso(c.ref)) / 86400000));
+    return { ref: c.ref, late: late, days: days, textLate: c.textLate, textFuture: c.textFuture };
+  }
+
+  function authPrazoText(info){
+    if (!info) return "";
+    var dateBR = formatCreatedAt(info.ref);
+    if (info.late) return info.textLate + " " + dateBR + " — " + info.days + " dia" + (info.days === 1 ? "" : "s") + " atrasado";
+    return info.textFuture + " " + dateBR + " — dentro do prazo";
+  }
+
+  function authTitle(a){
+    if (a.campanha && a.campanha.trim() && a.campanha.trim() !== "-") return a.campanha;
+    return a.veiculo || a.praca || "Autorização";
+  }
+
+  function renderAuthRow(a, pend, info){
+    var badgeLabels = { pi: "PI pendente", ap: "AP pendente", material: "Material pendente" };
+    var badges = (info && info.late) ? '<span class="au-badge late">Atrasado</span>' : "";
+    badges += pend.map(function(k){ return '<span class="au-badge pending">'+badgeLabels[k]+'</span>'; }).join("");
+    var metaParts = [];
+    if (a.praca) metaParts.push('<span>'+escapeHtml(a.praca)+'</span>');
+    if (a.veiculo) metaParts.push('<span>'+escapeHtml(a.veiculo)+'</span>');
+    var prazoHtml = info ? '<div class="au-prazo'+(info.late ? " late-text" : "")+'">'+escapeHtml(authPrazoText(info))+'</div>' : "";
+    return '<div class="auth-row'+(info && info.late ? " late" : "")+'" data-id="'+a.id+'">'
+      + '<div class="au-main">'
+        + '<div class="au-title">'+escapeHtml(authTitle(a))+'</div>'
+        + '<div class="au-meta">'+metaParts.join("")+'</div>'
+        + prazoHtml
+      + '</div>'
+      + '<div class="au-badges">'+badges+'</div>'
+      + '</div>';
+  }
+
+  function authPassesFilter(a){
+    if (!state.authSearch) return true;
+    var q = state.authSearch.trim().toLowerCase();
+    var hay = [a.cliente, a.campanha, a.praca, a.veiculo, a.contato].join(" ").toLowerCase();
+    return hay.indexOf(q) !== -1;
+  }
+
+  function renderAuthList(){
+    var items = state.autorizacoes
+      .map(function(a){ return { a: a, pend: authPendencias(a), info: authDeadlineInfo(a) }; })
+      .filter(function(x){ return x.pend.length > 0 && authPassesFilter(x.a); })
+      .sort(function(x,y){
+        var xl = (x.info && x.info.late) ? 0 : 1, yl = (y.info && y.info.late) ? 0 : 1;
+        if (xl !== yl) return xl - yl;
+        var xr = x.info ? x.info.ref : "9999-99-99", yr = y.info ? y.info.ref : "9999-99-99";
+        return xr.localeCompare(yr);
+      });
+    var el = document.getElementById("authList");
+    el.innerHTML = items.length ? items.map(function(x){ return renderAuthRow(x.a, x.pend, x.info); }).join("")
+      : '<div class="empty-note">'+(state.authSearch ? "Nenhuma pendência encontrada com esse filtro." : "Nenhuma pendência no momento.")+'</div>';
+    el.querySelectorAll(".auth-row").forEach(function(row){
+      row.addEventListener("click", function(){ openAuthDetail(row.getAttribute("data-id")); });
+    });
+    var note = document.getElementById("authSyncNote");
+    note.textContent = state.authSyncInfo
+      ? ("Última sincronização: " + new Date(state.authSyncInfo.lastSyncAt).toLocaleString("pt-BR") + " · " + items.length + " pendências de " + state.authSyncInfo.count + " registros")
+      : "Ainda sem sincronização.";
+  }
+
+  function openAuthDetail(id){
+    var a = state.autorizacoes.filter(function(x){ return x.id === id; })[0];
+    if (!a) return;
+    var rows = [
+      ["Cliente", a.cliente], ["Centro de custo", a.centroCusto], ["Campanha", a.campanha], ["Praça", a.praca],
+      ["Veículo", a.veiculo], ["Contato", a.contato], ["Formato", a.formato], ["Veiculação", a.veiculacao],
+      ["Publi", a.publi], ["Nº PI", a.numPi], ["PI enviado", formatCreatedAt(a.piEnviado)], ["PI recebido", formatCreatedAt(a.piRecebido)],
+      ["N° AP", a.numAp], ["AP enviada", formatCreatedAt(a.apEnviada)], ["AP assinada", formatCreatedAt(a.apAssinada)],
+      ["RM enviada", formatCreatedAt(a.rmEnviada)], ["Envio material (planejado)", formatCreatedAt(a.dataEnvioMaterialPlanejada)],
+      ["Envio material (realizado)", formatCreatedAt(a.dataEnvioMaterialRealizada)], ["PP", a.pp],
+      ["Status de material", a.statusMaterial], ["Solicitação checking", formatCreatedAt(a.solicitacaoChecking)],
+      ["Checking confirmado", formatCreatedAt(a.checkingConfirmado)], ["Checking final", formatCreatedAt(a.checkingFinal)],
+      ["Financeiro", a.financeiro], ["Observação", a.observacao]
+    ];
+    var body = '<dl class="auth-detail">' + rows.filter(function(r){ return r[1]; }).map(function(r){
+      return '<dt>'+escapeHtml(r[0])+'</dt><dd>'+escapeHtml(String(r[1]))+'</dd>';
+    }).join("") + '</dl>';
+    openDrawer(authTitle(a), a.cliente ? "Cliente: "+a.cliente : "", body);
+  }
+
+  document.getElementById("authSearchInput").addEventListener("input", function(){
+    state.authSearch = this.value;
+    renderAuthList();
+  });
 
   document.getElementById("searchInput").addEventListener("input", function(){
     state.searchQuery = this.value;
@@ -1264,6 +1445,14 @@ if (firebaseConfigured) {
         console.error(err);
         showBanner("Conexão instável com o banco — suas próximas edições podem não salvar.");
       });
+      onSnapshot(collection(fdb, "autorizacoes"), function(snap){
+        state.autorizacoes = snap.docs.map(function(d){ return Object.assign({ id: d.id }, d.data()); });
+        if (state.view === "auth") renderAuthList();
+      }, function(err){ console.error(err); });
+      onSnapshot(doc(fdb, "meta", "autorizacoes_sync"), function(snap){
+        state.authSyncInfo = snap.exists() ? snap.data() : null;
+        if (state.view === "auth") renderAuthList();
+      }, function(err){ console.error(err); });
     } catch (e) {
       console.error(e);
       showBanner("Não foi possível conectar ao Firebase — confira a configuração e as regras do Firestore. Trabalhando localmente nesta sessão.");
