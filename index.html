@@ -933,7 +933,7 @@ if (firebaseConfigured) {
   }
 
   function renderAuthRow(a, pend, info){
-    var badgeLabels = { pi: "PI pendente", ap: "AP pendente", material: "Material pendente" };
+    var badgeLabels = { pi: "Recebimento do PI pendente", ap: "AP assinada pendente", material: "Envio de material pendente" };
     var badges = (info && info.late) ? '<span class="au-badge late">Atrasado</span>' : "";
     badges += pend.map(function(k){ return '<span class="au-badge pending">'+badgeLabels[k]+'</span>'; }).join("");
     var metaParts = [];
