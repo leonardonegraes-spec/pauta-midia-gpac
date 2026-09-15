@@ -97,52 +97,55 @@ function buildIndividualHtml(person, items, planos, today) {
   return `<table style="width:100%;border-collapse:collapse;">${rows}</table>`;
 }
 
-function buildTeamSummaryHtml(weekDemandas, today) {
+function statusBlockHtml(label, color, items, planos) {
+  if (!items.length) return "";
+  items.sort((a, b) => a.date.localeCompare(b.date));
+  const rows = items.map((d) => {
+    const campanha = campanhaLabel(d, planos);
+    return `
+      <tr>
+        <td style="padding:4px 10px 4px 0;font-size:12px;color:#52690E;font-weight:700;white-space:nowrap;">${escapeHtml(campanha || "—")}</td>
+        <td style="padding:4px 10px;font-size:12px;color:#21241B;">${escapeHtml(d.title)}</td>
+        <td style="padding:4px 0;font-size:12px;color:#666B58;text-align:right;white-space:nowrap;">${formatPrazo(d.date)}</td>
+      </tr>`;
+  }).join("");
+  return `
+    <tr><td colspan="3" style="font-size:10.5px;color:${color};text-transform:uppercase;font-weight:700;letter-spacing:.3px;padding:8px 0 2px;">${label}</td></tr>
+    ${rows}`;
+}
+
+function buildTeamSummaryHtml(weekDemandas, planos) {
   const byPerson = {};
-  TEAM.forEach((name) => { byPerson[name] = { pendente: 0, producao: 0, concluido: 0 }; });
-  byPerson["Não atribuído"] = { pendente: 0, producao: 0, concluido: 0 };
+  TEAM.forEach((name) => { byPerson[name] = { pendente: [], producao: [] }; });
+  const unassigned = { pendente: [], producao: [] };
 
-  let atrasadas = 0;
   weekDemandas.forEach((d) => {
-    const person = d.responsavel && byPerson[d.responsavel] ? d.responsavel : (d.responsavel ? d.responsavel : "Não atribuído");
-    if (!byPerson[person]) byPerson[person] = { pendente: 0, producao: 0, concluido: 0 };
-    const bucket = d.status === "concluido" ? "concluido" : d.status === "producao" ? "producao" : "pendente";
-    byPerson[person][bucket]++;
-    if (d.date < toIsoDate(today) && d.status !== "concluido") atrasadas++;
+    if (d.status === "concluido") return; // total do time não mostra concluído
+    const bucket = d.status === "producao" ? "producao" : "pendente";
+    if (d.responsavel) {
+      if (!byPerson[d.responsavel]) byPerson[d.responsavel] = { pendente: [], producao: [] };
+      byPerson[d.responsavel][bucket].push(d);
+    } else {
+      unassigned[bucket].push(d);
+    }
   });
+  if (unassigned.pendente.length || unassigned.producao.length) byPerson["Não atribuído"] = unassigned;
 
-  const rows = Object.keys(byPerson)
-    .filter((name) => TEAM.includes(name) || byPerson[name].pendente + byPerson[name].producao + byPerson[name].concluido > 0)
-    .map((name) => {
-      const c = byPerson[name];
-      return `
-        <tr>
-          <td style="padding:8px 10px;border-bottom:1px solid #E4E6DC;font-weight:700;color:#21241B;font-size:13px;">${escapeHtml(name)}</td>
-          <td style="padding:8px 10px;border-bottom:1px solid #E4E6DC;text-align:center;color:#666B58;font-size:13px;">${c.pendente}</td>
-          <td style="padding:8px 10px;border-bottom:1px solid #E4E6DC;text-align:center;color:#2160C4;font-size:13px;">${c.producao}</td>
-          <td style="padding:8px 10px;border-bottom:1px solid #E4E6DC;text-align:center;color:#1F7A3B;font-size:13px;">${c.concluido}</td>
-        </tr>`;
-    }).join("");
-
-  const totalAberto = weekDemandas.filter((d) => d.status !== "concluido").length;
-  const totalConcluido = weekDemandas.filter((d) => d.status === "concluido").length;
+  const sections = Object.entries(byPerson).map(([name, c]) => {
+    const hasItems = c.pendente.length || c.producao.length;
+    const body = hasItems
+      ? `<table style="width:100%;border-collapse:collapse;">${statusBlockHtml("Pendente", "#8C6208", c.pendente, planos)}${statusBlockHtml("Em produção", "#2160C4", c.producao, planos)}</table>`
+      : `<p style="color:#9BA089;font-size:12px;margin:2px 0 0;">Sem pendências nesta semana.</p>`;
+    return `
+      <div style="margin-bottom:16px;">
+        <div style="font-weight:700;color:#21241B;font-size:14px;border-bottom:2px solid #E4E6DC;padding-bottom:3px;margin-bottom:4px;">${escapeHtml(name)}</div>
+        ${body}
+      </div>`;
+  }).join("");
 
   return `
-    <h3 style="color:#21241B;font-size:15px;margin:22px 0 8px;">Total do time — esta semana</h3>
-    <p style="color:#666B58;font-size:12px;margin:0 0 10px;">
-      ${totalAberto} pauta${totalAberto === 1 ? "" : "s"} em aberto ·
-      ${atrasadas} atrasada${atrasadas === 1 ? "" : "s"} ·
-      ${totalConcluido} concluída${totalConcluido === 1 ? "" : "s"}
-    </p>
-    <table style="width:100%;border-collapse:collapse;">
-      <tr>
-        <td style="padding:6px 10px;font-size:11px;color:#9BA089;text-transform:uppercase;">Pessoa</td>
-        <td style="padding:6px 10px;font-size:11px;color:#9BA089;text-transform:uppercase;text-align:center;">Pendente</td>
-        <td style="padding:6px 10px;font-size:11px;color:#9BA089;text-transform:uppercase;text-align:center;">Em produção</td>
-        <td style="padding:6px 10px;font-size:11px;color:#9BA089;text-transform:uppercase;text-align:center;">Concluído</td>
-      </tr>
-      ${rows}
-    </table>`;
+    <h3 style="color:#21241B;font-size:15px;margin:22px 0 10px;">Total do time — esta semana</h3>
+    ${sections}`;
 }
 
 function buildEmailHtml(person, personItems, weekDemandas, planos, today) {
@@ -153,7 +156,7 @@ function buildEmailHtml(person, personItems, weekDemandas, planos, today) {
       Atrasadas + o que vence até domingo desta semana.
     </p>
     ${buildIndividualHtml(person, personItems, planos, today)}
-    ${buildTeamSummaryHtml(weekDemandas, today)}
+    ${buildTeamSummaryHtml(weekDemandas, planos)}
     <p style="color:#9BA089;font-size:11px;margin-top:18px;">
       Board completo: https://leonardonegraes-spec.github.io/pauta-midia-gpac/
     </p>
