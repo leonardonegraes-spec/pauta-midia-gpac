@@ -97,7 +97,7 @@
   .monthbar .today-btn { margin-left: 4px; }
 
   /* ---------- Stats ---------- */
-  .stats { display: grid; grid-template-columns: repeat(4, 1fr); gap: 12px; margin-bottom: 20px; }
+  .stats { display: grid; grid-template-columns: repeat(5, 1fr); gap: 12px; margin-bottom: 20px; }
   .stat {
     background: var(--surface); border-radius: 10px;
     padding: 14px 16px; border-top: 3px solid var(--border);
@@ -107,6 +107,8 @@
   .stat .l { color: var(--text2); font-size: 11px; text-transform: uppercase; letter-spacing: .5px; margin-top: 2px; }
   .stat.total { border-top-color: var(--info); }
   .stat.total .n { color: var(--info); }
+  .stat.grand-total { border-top-color: var(--accent); }
+  .stat.grand-total .n { color: var(--accent); }
   .stat.unassigned { border-top-color: var(--warn); }
   .stat.unassigned .n { color: var(--warn); }
   .stat.late { border-top-color: var(--danger); }
@@ -414,6 +416,7 @@
 
   <div class="stats">
     <div class="stat total"><div class="n" id="statTotal">0</div><div class="l">Pautas no mês</div></div>
+    <div class="stat grand-total"><div class="n" id="statGrandTotal">0</div><div class="l">Pauta Total</div></div>
     <div class="stat unassigned"><div class="n" id="statUnassigned">0</div><div class="l">Sem responsável</div></div>
     <div class="stat late"><div class="n" id="statLate">0</div><div class="l">Atrasadas</div></div>
     <div class="stat done"><div class="n" id="statDone">0</div><div class="l">Concluídas</div></div>
@@ -762,6 +765,7 @@ if (firebaseConfigured) {
     var late = monthDemandas.filter(function(d){ return d.date < today && d.status !== "concluido"; }).length;
     var done = monthDemandas.filter(function(d){ return d.status === "concluido"; }).length;
     document.getElementById("statTotal").textContent = monthDemandas.length;
+    document.getElementById("statGrandTotal").textContent = state.demandas.length;
     document.getElementById("statUnassigned").textContent = unassigned;
     document.getElementById("statLate").textContent = late;
     document.getElementById("statDone").textContent = done;
