@@ -24,3 +24,4 @@ jobs:
           TEAM_EMAILS: ${{ secrets.TEAM_EMAILS }}
           GMAIL_USER: ${{ secrets.GMAIL_USER }}
           GMAIL_APP_PASSWORD: ${{ secrets.GMAIL_APP_PASSWORD }}
+          RUN_SCHEDULE: ${{ github.event.schedule }}

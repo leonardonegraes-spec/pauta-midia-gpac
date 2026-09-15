@@ -201,11 +201,21 @@ function buildEmailHtml(recipient, ctx) {
   return `<div style="font-family:Arial,Helvetica,sans-serif;max-width:600px;margin:0 auto;padding:28px 24px;background:#FAFAF7;">${blocks.join("")}</div>`;
 }
 
+// Cron "0 21 * * *" = 18:00 em Brasília (o outro horário, "0 11 * * *" = 08h, não filtra
+// ninguém). Rodadas manuais (workflow_dispatch) não têm RUN_SCHEDULE — tratadas como 08h
+// (envia para todo mundo), já que são disparos avulsos de teste, não a rotina do fim de dia.
+const EVENING_CRON = "0 21 * * *";
+
 async function main() {
   const serviceAccount = JSON.parse(requireEnv("FIREBASE_SERVICE_ACCOUNT"));
-  const recipients = JSON.parse(requireEnv("TEAM_EMAILS")); // array de {email, person, individual, team}
+  const allRecipients = JSON.parse(requireEnv("TEAM_EMAILS")); // array de {email, person, individual, team, schedule?}
   const gmailUser = requireEnv("GMAIL_USER");
   const gmailAppPassword = requireEnv("GMAIL_APP_PASSWORD");
+
+  const isEveningRun = process.env.RUN_SCHEDULE === EVENING_CRON;
+  // schedule: "morning" só recebe a rodada das 08h (ex: gestores que só querem o resumo da manhã).
+  const recipients = allRecipients.filter((r) => !(isEveningRun && r.schedule === "morning"));
+  console.log(`Rodada ${isEveningRun ? "da noite (18h)" : "da manhã (08h) ou manual"} — ${recipients.length} de ${allRecipients.length} destinatário(s) nesta rodada.`);
 
   admin.initializeApp({ credential: admin.credential.cert(serviceAccount) });
   const db = admin.firestore();
