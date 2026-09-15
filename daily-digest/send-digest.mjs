@@ -78,9 +78,9 @@ function escapeHtml(s) {
   return (s || "").replace(/[&<>"']/g, (c) => ({ "&": "&amp;", "<": "&lt;", ">": "&gt;", '"': "&quot;", "'": "&#39;" }[c]));
 }
 
-function buildIndividualHtml(person, items, planos, today) {
+function buildIndividualHtml(items, planos, today, emptyMessage) {
   if (!items.length) {
-    return `<p style="color:#666B58;font-size:13px;line-height:1.6;">Nenhuma pendência sua até o fim desta semana. 🎉</p>`;
+    return `<p style="color:#666B58;font-size:13px;line-height:1.6;">${emptyMessage}</p>`;
   }
   const rows = items.map((d) => {
     const dias = daysDiff(d.date, today);
@@ -124,12 +124,12 @@ function statusBlockHtml(label, color, bgColor, items, planos) {
     </div>`;
 }
 
-function buildTeamSummaryHtml(weekDemandas, planos) {
+function buildTeamSummaryHtml(title, demandas, planos) {
   const byPerson = {};
   TEAM.forEach((name) => { byPerson[name] = { pendente: [], producao: [] }; });
   const unassigned = { pendente: [], producao: [] };
 
-  weekDemandas.forEach((d) => {
+  demandas.forEach((d) => {
     if (d.status === "concluido") return; // total do time não mostra concluído
     const bucket = d.status === "producao" ? "producao" : "pendente";
     const resp = getResponsaveis(d);
@@ -148,7 +148,7 @@ function buildTeamSummaryHtml(weekDemandas, planos) {
     const hasItems = c.pendente.length || c.producao.length;
     const body = hasItems
       ? `${statusBlockHtml("Pendente", "#8C6208", "#F5EED9", c.pendente, planos)}${statusBlockHtml("Em produção", "#2160C4", "#E3EDFB", c.producao, planos)}`
-      : `<p style="color:#9BA089;font-size:12.5px;margin:0;">Sem pendências nesta semana.</p>`;
+      : `<p style="color:#9BA089;font-size:12.5px;margin:0;">Sem pendências neste período.</p>`;
     return `
       <div style="background:#F4F5EF;border:1px solid #E4E6DC;border-radius:12px;padding:18px 20px;margin-bottom:16px;">
         <div style="font-weight:700;color:#21241B;font-size:15px;">${escapeHtml(name)}</div>
@@ -157,31 +157,43 @@ function buildTeamSummaryHtml(weekDemandas, planos) {
   }).join("");
 
   return `
-    <h3 style="color:#21241B;font-size:16px;margin:0 0 16px;">Total do time — esta semana</h3>
+    <h3 style="color:#21241B;font-size:16px;margin:0 0 16px;">${title}</h3>
     ${sections}`;
 }
 
+const DIVIDER = `<div style="border-top:1px solid #E4E6DC;margin:28px 0 24px;"></div>`;
+const DIVIDER_WIDE = `<div style="border-top:1px solid #E4E6DC;margin:32px 0 24px;"></div>`;
+
 // recipient: { email, person: string|null, individual: bool, team: bool }
-function buildEmailHtml(recipient, personItems, weekDemandas, planos, today) {
+function buildEmailHtml(recipient, ctx) {
+  const { byPersonWeek, byPersonFuture, weekDemandas, futureDemandas, planos, today } = ctx;
   const blocks = [];
+
   if (recipient.individual && recipient.person) {
+    const weekItems = (byPersonWeek[recipient.person] || []).sort((a, b) => a.date.localeCompare(b.date));
+    const futureItems = (byPersonFuture[recipient.person] || []).sort((a, b) => a.date.localeCompare(b.date));
     blocks.push(`
-      <h2 style="color:#21241B;font-size:19px;margin:0 0 6px;">Sua pauta da semana, ${escapeHtml(recipient.person)}</h2>
-      <p style="color:#666B58;font-size:13px;margin:0 0 20px;line-height:1.6;">
-        Atrasadas + o que vence até domingo desta semana.
-      </p>
-      ${buildIndividualHtml(recipient.person, personItems, planos, today)}
+      <h2 style="color:#21241B;font-size:19px;margin:0 0 6px;">Sua pauta desta semana, ${escapeHtml(recipient.person)}</h2>
+      <p style="color:#666B58;font-size:13px;margin:0 0 20px;line-height:1.6;">Atrasadas + o que vence até domingo desta semana.</p>
+      ${buildIndividualHtml(weekItems, planos, today, "Nenhuma pendência sua até o fim desta semana. 🎉")}
+      ${DIVIDER}
+      <h2 style="color:#21241B;font-size:17px;margin:0 0 6px;">Próxima semana em diante</h2>
+      <p style="color:#666B58;font-size:13px;margin:0 0 20px;line-height:1.6;">O que vem depois de domingo — ainda sem urgência.</p>
+      ${buildIndividualHtml(futureItems, planos, today, "Nada agendado para depois desta semana ainda.")}
     `);
   }
-  if (recipient.individual && recipient.team) {
-    blocks.push(`<div style="border-top:1px solid #E4E6DC;margin:32px 0 24px;"></div>`);
-  }
+
+  if (recipient.individual && recipient.team) blocks.push(DIVIDER_WIDE);
+
   if (recipient.team) {
     if (!recipient.individual) {
-      blocks.push(`<h2 style="color:#21241B;font-size:19px;margin:0 0 6px;">Pauta da semana — Total do time</h2><p style="color:#666B58;font-size:13px;margin:0 0 20px;line-height:1.6;">Atrasadas + o que vence até domingo desta semana, por pessoa.</p>`);
+      blocks.push(`<h2 style="color:#21241B;font-size:19px;margin:0 0 20px;">Pauta da semana — Total do time</h2>`);
     }
-    blocks.push(buildTeamSummaryHtml(weekDemandas, planos));
+    blocks.push(buildTeamSummaryHtml("Total do time — esta semana", weekDemandas, planos));
+    blocks.push(DIVIDER);
+    blocks.push(buildTeamSummaryHtml("Total do time — próxima semana em diante", futureDemandas, planos));
   }
+
   blocks.push(`
     <p style="color:#9BA089;font-size:11px;margin-top:24px;">
       Board completo: https://leonardonegraes-spec.github.io/pauta-midia-gpac/
@@ -212,36 +224,45 @@ async function main() {
 
   const allDemandas = demandasSnap.docs.map((doc) => ({ id: doc.id, ...doc.data() }));
 
-  // Escopo do relatório: tudo que já está atrasado, mais o que vence até o fim desta semana.
+  // Dois recortes: "esta semana" (atrasadas + até domingo) e "próxima semana em diante".
   const weekDemandas = allDemandas.filter((d) => d.date <= weekEndIso);
+  const futureDemandas = allDemandas.filter((d) => d.date > weekEndIso);
 
-  const byPerson = {};
-  weekDemandas.forEach((d) => {
-    if (d.status === "concluido") return; // a lista individual mostra só o que precisa de ação
-    getResponsaveis(d).forEach((person) => {
-      (byPerson[person] = byPerson[person] || []).push(d);
+  function groupByPerson(demandas) {
+    const byPerson = {};
+    demandas.forEach((d) => {
+      if (d.status === "concluido") return; // a lista individual mostra só o que precisa de ação
+      getResponsaveis(d).forEach((person) => {
+        (byPerson[person] = byPerson[person] || []).push(d);
+      });
     });
-  });
+    return byPerson;
+  }
+  const byPersonWeek = groupByPerson(weekDemandas);
+  const byPersonFuture = groupByPerson(futureDemandas);
 
   const transporter = nodemailer.createTransport({
     service: "gmail",
     auth: { user: gmailUser, pass: gmailAppPassword },
   });
 
+  const ctx = { byPersonWeek, byPersonFuture, weekDemandas, futureDemandas, planos, today };
+
   let sent = 0;
   for (const r of recipients) {
-    const items = r.person ? (byPerson[r.person] || []).sort((a, b) => a.date.localeCompare(b.date)) : [];
-    const html = buildEmailHtml(r, items, weekDemandas, planos, today);
+    const html = buildEmailHtml(r, ctx);
+    const weekCount = r.person ? (byPersonWeek[r.person] || []).length : 0;
+    const futureCount = r.person ? (byPersonFuture[r.person] || []).length : 0;
     await transporter.sendMail({
       from: `Pauta de Mídia GPAC <${gmailUser}>`,
       to: r.email,
       subject: "ADEMICON I PAUTA DA MÍDIA",
       html,
     });
-    console.log(`Enviado para ${r.person || "(sem pessoa)"} <${r.email}> — individual:${r.individual} team:${r.team} — ${items.length} pauta(s) individual(is).`);
+    console.log(`Enviado para ${r.person || "(sem pessoa)"} <${r.email}> — individual:${r.individual} team:${r.team} — ${weekCount} esta semana, ${futureCount} depois.`);
     sent++;
   }
-  console.log(`Concluído. ${sent} e-mail(s) enviado(s). Escopo: até ${weekEndIso} (hoje ${todayIso}).`);
+  console.log(`Concluído. ${sent} e-mail(s) enviado(s). Corte da semana: ${weekEndIso} (hoje ${todayIso}).`);
 }
 
 main().catch((e) => { console.error(e); process.exit(1); });
