@@ -285,7 +285,6 @@
   .field-row { display: flex; gap: 12px; }
   .field-row .field { flex: 1; }
   .praca-preview { font-size: 11.5px; color: var(--text2); margin-top: 5px; line-height: 1.5; }
-  .modal-meta { color: var(--text3); font-size: 11.5px; margin: -10px 0 16px; }
   .modal-actions { display: flex; justify-content: space-between; align-items: center; margin-top: 18px; gap: 10px; }
   .modal-actions .right { display: flex; gap: 8px; }
 
@@ -452,24 +451,27 @@
 <div class="overlay" id="modalOverlay">
   <div class="modal">
     <h2><span id="modalTitleLabel">Nova pauta</span><button class="close" id="modalClose">✕</button></h2>
-    <div class="modal-meta" id="modalMeta"></div>
     <div class="field">
       <label for="fTitle">Título da demanda</label>
       <input id="fTitle" type="text" placeholder="Ex: Plano Litoral Paraná" />
     </div>
     <div class="field-row">
       <div class="field">
+        <label for="fCreatedAt">Data de chegada do job</label>
+        <input id="fCreatedAt" type="date" />
+      </div>
+      <div class="field">
         <label for="fDate">Prazo</label>
         <input id="fDate" type="date" />
       </div>
-      <div class="field">
-        <label for="fStatus">Status</label>
-        <select id="fStatus">
-          <option value="pendente">Pendente</option>
-          <option value="producao">Em produção</option>
-          <option value="concluido">Concluído</option>
-        </select>
-      </div>
+    </div>
+    <div class="field">
+      <label for="fStatus">Status</label>
+      <select id="fStatus">
+        <option value="pendente">Pendente</option>
+        <option value="producao">Em produção</option>
+        <option value="concluido">Concluído</option>
+      </select>
     </div>
     <div class="field">
       <label for="fPlano">Campanha</label>
@@ -486,7 +488,7 @@
     </div>
     <div class="field">
       <label for="fNotas">Notas</label>
-      <textarea id="fNotas" placeholder="Observações, links, contexto..."></textarea>
+      <textarea id="fNotas" placeholder="Observações, links, contexto, briefing, skills..."></textarea>
     </div>
     <div class="modal-actions">
       <button class="btn danger ghost small" id="btnDelete" style="display:none">Excluir</button>
@@ -922,24 +924,24 @@ if (firebaseConfigured) {
     document.getElementById("btnDelete").style.display = isNew ? "none" : "inline-block";
     if (isNew) {
       document.getElementById("fTitle").value = "";
+      document.getElementById("fCreatedAt").value = todayIso();
       document.getElementById("fDate").value = presetDate || todayIso();
       document.getElementById("fStatus").value = "pendente";
       document.getElementById("fPlano").value = "";
       document.getElementById("fPracas").value = "";
       setRespChecks([]);
       document.getElementById("fNotas").value = "";
-      document.getElementById("modalMeta").textContent = "";
     } else {
       var d = state.demandas.filter(function(x){ return x.id === id; })[0];
       if (!d) return;
       document.getElementById("fTitle").value = d.title || "";
+      document.getElementById("fCreatedAt").value = (d.createdAt ? d.createdAt.slice(0,10) : todayIso());
       document.getElementById("fDate").value = d.date || todayIso();
       document.getElementById("fStatus").value = d.status || "pendente";
       document.getElementById("fPlano").value = campanhaLabel(d);
       document.getElementById("fPracas").value = campanhaPracas(d).join(", ");
       setRespChecks(getResponsaveis(d));
       document.getElementById("fNotas").value = d.notas || "";
-      document.getElementById("modalMeta").textContent = d.createdAt ? ("Cadastrada em " + formatCreatedAt(d.createdAt)) : "";
     }
     overlay.classList.add("show");
     document.getElementById("fTitle").focus();
@@ -963,9 +965,11 @@ if (firebaseConfigured) {
     var date = document.getElementById("fDate").value;
     if (!title || !date) { document.getElementById("fTitle").focus(); return; }
     var pracasRaw = document.getElementById("fPracas").value.trim();
+    var createdAt = document.getElementById("fCreatedAt").value || todayIso();
     var payload = {
       title: title,
       date: date,
+      createdAt: createdAt,
       status: document.getElementById("fStatus").value,
       planoKey: document.getElementById("fPlano").value.trim(),
       pracas: pracasRaw ? pracasRaw.split(",").map(function(s){ return s.trim(); }).filter(Boolean) : [],
@@ -979,7 +983,6 @@ if (firebaseConfigured) {
       persist(state.editingId, payload);
     } else {
       var id = "d-" + Date.now() + "-" + Math.random().toString(36).slice(2,7);
-      payload.createdAt = todayIso();
       var newDoc = Object.assign({ id: id }, payload);
       state.demandas.push(newDoc);
       persistCreate(id, payload);
