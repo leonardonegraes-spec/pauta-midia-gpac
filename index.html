@@ -32,6 +32,7 @@
     --anna: #C43F80;
     --leonardo: #128F89;
     --rejane: #7A54C4;
+    --time: #5B6470;
   }
 
   * { box-sizing: border-box; }
@@ -182,6 +183,7 @@
     flex: none; width: 78px; font-size: 12px; font-weight: 700; color: var(--text2); line-height: 1.3;
   }
   .pauta-row .pl-date.late { color: var(--danger); }
+  .pauta-row .pl-created { color: var(--text3); font-weight: 400; font-size: 10px; margin-top: 3px; }
   .pauta-row .pl-main { flex: 1; min-width: 0; }
   .pauta-row .pl-title { font-weight: 700; font-size: 13.5px; color: var(--text); }
   .pauta-row .pl-meta {
@@ -280,6 +282,7 @@
   .field-row { display: flex; gap: 12px; }
   .field-row .field { flex: 1; }
   .praca-preview { font-size: 11.5px; color: var(--text2); margin-top: 5px; line-height: 1.5; }
+  .modal-meta { color: var(--text3); font-size: 11.5px; margin: -10px 0 16px; }
   .modal-actions { display: flex; justify-content: space-between; align-items: center; margin-top: 18px; gap: 10px; }
   .modal-actions .right { display: flex; gap: 8px; }
 
@@ -445,6 +448,7 @@
 <div class="overlay" id="modalOverlay">
   <div class="modal">
     <h2><span id="modalTitleLabel">Nova pauta</span><button class="close" id="modalClose">✕</button></h2>
+    <div class="modal-meta" id="modalMeta"></div>
     <div class="field">
       <label for="fTitle">Título da demanda</label>
       <input id="fTitle" type="text" placeholder="Ex: Plano Litoral Paraná" />
@@ -550,7 +554,8 @@ if (firebaseConfigured) {
     { key: "Eduardo",   color: "var(--eduardo)" },
     { key: "Anna",      color: "var(--anna)" },
     { key: "Leonardo",  color: "var(--leonardo)" },
-    { key: "Rejane",    color: "var(--rejane)" }
+    { key: "Rejane",    color: "var(--rejane)" },
+    { key: "Time",      color: "var(--time)" }
   ];
 
   var SEED_PLANOS = {
@@ -578,7 +583,7 @@ if (firebaseConfigured) {
     { id: "seed-13", date: "2026-10-02", title: "Plano Verão 26/27 (Final)",      planoKey: "verao",          pracas: null,          responsavel: "Anna",      status: "pendente", notas: "" }
   ];
 
-  var WEEKDAYS = ["SEG","TER","QUA","QUI","SEX","SÁB","DOM"];
+  var WEEKDAYS = ["DOM","SEG","TER","QUA","QUI","SEX","SÁB"];
   var MONTHS = ["janeiro","fevereiro","março","abril","maio","junho","julho","agosto","setembro","outubro","novembro","dezembro"];
 
   function pad(n){ return n < 10 ? "0"+n : ""+n; }
@@ -640,9 +645,9 @@ if (firebaseConfigured) {
   function computeWeeks(year, month){
     var first = new Date(year, month, 1);
     var last = new Date(year, month+1, 0);
-    function mondayOf(d){ var wd = (d.getDay()+6)%7; var r = new Date(d); r.setDate(d.getDate()-wd); return r; }
-    var start = mondayOf(first);
-    var end = mondayOf(last); end.setDate(end.getDate()+6);
+    function sundayOf(d){ var wd = d.getDay(); var r = new Date(d); r.setDate(d.getDate()-wd); return r; }
+    var start = sundayOf(first);
+    var end = sundayOf(last); end.setDate(end.getDate()+6);
     var weeks = []; var cur = new Date(start);
     while (cur <= end) {
       var week = [];
@@ -659,7 +664,7 @@ if (firebaseConfigured) {
   function renderWeekdayRow(){
     var el = document.getElementById("weekdayRow");
     el.innerHTML = WEEKDAYS.map(function(w,i){
-      return '<div class="weekday'+(i>=5?' weekend':'')+'">'+w+'</div>';
+      return '<div class="weekday'+(i===0||i===6?' weekend':'')+'">'+w+'</div>';
     }).join("");
   }
 
@@ -720,15 +725,16 @@ if (firebaseConfigured) {
 
   function renderTeamRow(){
     var el = document.getElementById("teamRow");
-    var monthDemandas = state.demandas.filter(function(d){ return d.date.slice(0,7) === state.year + "-" + pad(state.month+1); });
+    // Contagem histórica (todos os jobs que já existem, não só o mês em exibição).
     var counts = {};
-    monthDemandas.forEach(function(d){
+    state.demandas.forEach(function(d){
       var resp = getResponsaveis(d);
       if (!resp.length) { counts["__none__"] = (counts["__none__"]||0)+1; return; }
       resp.forEach(function(k){ counts[k] = (counts[k]||0)+1; });
     });
+    var ranked = TEAM.slice().sort(function(a,b){ return (counts[b.key]||0) - (counts[a.key]||0); });
     var html = '<span class="label">Time</span>';
-    TEAM.forEach(function(m){
+    ranked.forEach(function(m){
       var active = state.activeFilters.has(m.key) ? " active" : "";
       html += '<div class="chip'+active+'" data-filter="'+m.key+'">'
         + '<span class="avatar" style="background:'+m.color+'">'+initials(m.key)+'</span>'
@@ -769,8 +775,9 @@ if (firebaseConfigured) {
     var statusBadgeClass = d.status === "concluido" ? "badge-concluido" : (d.status === "producao" ? "badge-producao" : "badge-pendente");
     var statusText = d.status === "concluido" ? "Concluído" : (d.status === "producao" ? "Em produção" : "Pendente");
     var avatarHtml = '<div class="avatar-stack">'+renderAvatars(resp)+'</div>';
+    var createdHtml = d.createdAt ? '<div class="pl-created">desde '+formatCreatedAt(d.createdAt)+'</div>' : '';
     return '<div class="pauta-row" data-id="'+d.id+'">'
-      + '<div class="pl-date'+(late?" late":"")+'">'+formatDateLong(d.date)+'</div>'
+      + '<div class="pl-date'+(late?" late":"")+'">'+formatDateLong(d.date)+createdHtml+'</div>'
       + avatarHtml
       + '<div class="pl-main">'
         + '<div class="pl-title">'+escapeHtml(d.title)+'</div>'
@@ -784,8 +791,9 @@ if (firebaseConfigured) {
   function renderList(){
     var monthKey = state.year + "-" + pad(state.month+1);
     var hasActiveFilters = state.activeFilters.size > 0 || !!state.statusFilter || !!state.searchQuery;
-    var items = state.demandas
-      .filter(function(d){ return d.date.slice(0,7) === monthKey; })
+    // Com algum filtro ativo, busca em todo o histórico (não só no mês em exibição).
+    var scope = hasActiveFilters ? state.demandas : state.demandas.filter(function(d){ return d.date.slice(0,7) === monthKey; });
+    var items = scope
       .filter(passesFilter)
       .sort(function(a,b){ return a.date.localeCompare(b.date); });
     var el = document.getElementById("listView");
@@ -895,6 +903,12 @@ if (firebaseConfigured) {
     return Array.from(document.querySelectorAll('#respChecks input[type="checkbox"]:checked')).map(function(cb){ return cb.value; });
   }
 
+  function formatCreatedAt(s){
+    if (!s) return "";
+    var d = parseIso(s.slice(0,10));
+    return d.toLocaleDateString("pt-BR", { day: "2-digit", month: "2-digit", year: "numeric" });
+  }
+
   function openModal(id, presetDate){
     populateSelects();
     state.editingId = id;
@@ -909,6 +923,7 @@ if (firebaseConfigured) {
       document.getElementById("fPracas").value = "";
       setRespChecks([]);
       document.getElementById("fNotas").value = "";
+      document.getElementById("modalMeta").textContent = "";
     } else {
       var d = state.demandas.filter(function(x){ return x.id === id; })[0];
       if (!d) return;
@@ -919,6 +934,7 @@ if (firebaseConfigured) {
       document.getElementById("fPracas").value = campanhaPracas(d).join(", ");
       setRespChecks(getResponsaveis(d));
       document.getElementById("fNotas").value = d.notas || "";
+      document.getElementById("modalMeta").textContent = d.createdAt ? ("Cadastrada em " + formatCreatedAt(d.createdAt)) : "";
     }
     overlay.classList.add("show");
     document.getElementById("fTitle").focus();
@@ -958,6 +974,7 @@ if (firebaseConfigured) {
       persist(state.editingId, payload);
     } else {
       var id = "d-" + Date.now() + "-" + Math.random().toString(36).slice(2,7);
+      payload.createdAt = todayIso();
       var newDoc = Object.assign({ id: id }, payload);
       state.demandas.push(newDoc);
       persistCreate(id, payload);
