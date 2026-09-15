@@ -129,6 +129,17 @@
   .chip:hover { border-color: var(--border-strong); }
   .chip.unassigned .avatar { background: var(--surface3); border: 1px dashed var(--text3); }
 
+  /* ---------- Filter bar ---------- */
+  .filter-bar { display: flex; gap: 10px; margin-bottom: 18px; flex-wrap: wrap; }
+  .filter-bar input[type="text"] {
+    flex: 1; min-width: 220px; background: var(--surface2); border: 1px solid var(--border); color: var(--text);
+    border-radius: 8px; padding: 9px 12px; font-size: 13px;
+  }
+  .filter-bar select {
+    background: var(--surface2); border: 1px solid var(--border); color: var(--text);
+    border-radius: 8px; padding: 9px 12px; font-size: 13px; flex: none;
+  }
+
   /* ---------- View switch ---------- */
   .view-switch { display: flex; justify-content: center; gap: 8px; margin-bottom: 18px; }
   .view-btn {
@@ -394,6 +405,17 @@
 
   <div class="team-row" id="teamRow"></div>
 
+  <div class="filter-bar">
+    <input type="text" id="searchInput" placeholder="🔍 Buscar por nome, campanha ou praça..." />
+    <select id="statusFilterSelect">
+      <option value="">Todos os status</option>
+      <option value="pendente">Pendente</option>
+      <option value="producao">Em produção</option>
+      <option value="concluido">Concluído</option>
+    </select>
+    <button class="btn small ghost" id="btnClearFilters">Limpar filtros</button>
+  </div>
+
   <div class="view-switch">
     <button class="view-btn active" id="btnViewCalendar">📅 Calendário</button>
     <button class="view-btn" id="btnViewList">📋 Pauta em lista</button>
@@ -582,6 +604,8 @@ if (firebaseConfigured) {
     demandas: [],
     planos: SEED_PLANOS,
     activeFilters: new Set(),
+    statusFilter: "",
+    searchQuery: "",
     editingId: null,
     dbAvailable: false
   };
@@ -618,22 +642,29 @@ if (firebaseConfigured) {
   }
 
   function passesFilter(d){
-    if (state.activeFilters.size === 0) return true;
-    var key = d.responsavel || "__none__";
-    return state.activeFilters.has(key);
+    if (state.activeFilters.size > 0) {
+      var key = d.responsavel || "__none__";
+      if (!state.activeFilters.has(key)) return false;
+    }
+    if (state.statusFilter && d.status !== state.statusFilter) return false;
+    if (state.searchQuery) {
+      var q = state.searchQuery.trim().toLowerCase();
+      var hay = [d.title, campanhaLabel(d), campanhaPracas(d).join(" "), d.responsavel || ""].join(" ").toLowerCase();
+      if (hay.indexOf(q) === -1) return false;
+    }
+    return true;
   }
 
   function renderCard(d){
     var color = teamColor(d.responsavel);
     var pracas = campanhaPracas(d);
     var planoLabel = campanhaLabel(d) || (pracas.length ? pracas.slice(0,2).join(", ") + (pracas.length>2 ? " +"+(pracas.length-2) : "") : "");
-    var faded = passesFilter(d) ? "" : "opacity:.28;";
     var avatarHtml = d.responsavel
       ? '<div class="mini-avatar" style="background:'+color+'">'+initials(d.responsavel)+'</div>'
       : '<div class="mini-avatar none"></div>';
     var statusBadgeClass = d.status === "concluido" ? "badge-concluido" : (d.status === "producao" ? "badge-producao" : "badge-pendente");
     var statusText = d.status === "concluido" ? "Concluído" : (d.status === "producao" ? "Em produção" : "Pendente");
-    return '<div class="card" draggable="true" data-id="'+d.id+'" style="border-left-color:'+(color||"var(--text3)")+';'+faded+'">'
+    return '<div class="card" draggable="true" data-id="'+d.id+'" style="border-left-color:'+(color||"var(--text3)")+'">'
       + '<div class="card-title">'+escapeHtml(d.title)+'</div>'
       + '<div class="card-meta">'+avatarHtml+'<div class="plano-tag">'+escapeHtml(planoLabel)+'</div><div class="status-badge '+statusBadgeClass+'">'+statusText+'</div></div>'
       + '</div>';
@@ -649,7 +680,7 @@ if (firebaseConfigured) {
       week.forEach(function(date){
         var di = iso(date);
         var outside = date.getMonth() !== state.month;
-        var items = demandasFor(di).sort(function(a,b){ return (a.title||"").localeCompare(b.title||""); });
+        var items = demandasFor(di).filter(passesFilter).sort(function(a,b){ return (a.title||"").localeCompare(b.title||""); });
         var cellClass = "day-cell" + (outside ? " outside" : "") + (di === today ? " today" : "");
         html += '<div class="'+cellClass+'" data-date="'+di+'">'
           + '<div class="day-head"><span class="day-num">'+date.getDate()+'</span><button class="day-add" data-date="'+di+'" title="Nova pauta">+</button></div>'
@@ -710,8 +741,7 @@ if (firebaseConfigured) {
     var avatarHtml = d.responsavel
       ? '<div class="mini-avatar" style="background:'+color+'">'+initials(d.responsavel)+'</div>'
       : '<div class="mini-avatar none"></div>';
-    var faded = passesFilter(d) ? "" : "opacity:.35;";
-    return '<div class="pauta-row" data-id="'+d.id+'" style="'+faded+'">'
+    return '<div class="pauta-row" data-id="'+d.id+'">'
       + '<div class="pl-date'+(late?" late":"")+'">'+formatDateLong(d.date)+'</div>'
       + avatarHtml
       + '<div class="pl-main">'
@@ -725,11 +755,14 @@ if (firebaseConfigured) {
 
   function renderList(){
     var monthKey = state.year + "-" + pad(state.month+1);
+    var hasActiveFilters = state.activeFilters.size > 0 || !!state.statusFilter || !!state.searchQuery;
     var items = state.demandas
       .filter(function(d){ return d.date.slice(0,7) === monthKey; })
+      .filter(passesFilter)
       .sort(function(a,b){ return a.date.localeCompare(b.date); });
     var el = document.getElementById("listView");
-    el.innerHTML = items.length ? items.map(renderPautaRow).join("") : '<div class="empty-note">Nenhuma pauta neste mês.</div>';
+    el.innerHTML = items.length ? items.map(renderPautaRow).join("")
+      : '<div class="empty-note">'+(hasActiveFilters ? "Nenhuma pauta encontrada com esse filtro." : "Nenhuma pauta neste mês.")+'</div>';
     el.querySelectorAll(".pauta-row").forEach(function(row){
       row.addEventListener("click", function(){ openModal(row.getAttribute("data-id")); });
     });
@@ -744,6 +777,27 @@ if (firebaseConfigured) {
   }
   document.getElementById("btnViewCalendar").addEventListener("click", function(){ setView("calendar"); });
   document.getElementById("btnViewList").addEventListener("click", function(){ setView("list"); });
+
+  document.getElementById("searchInput").addEventListener("input", function(){
+    state.searchQuery = this.value;
+    renderGrid();
+    renderList();
+  });
+  document.getElementById("statusFilterSelect").addEventListener("change", function(){
+    state.statusFilter = this.value;
+    renderGrid();
+    renderList();
+  });
+  document.getElementById("btnClearFilters").addEventListener("click", function(){
+    state.searchQuery = "";
+    state.statusFilter = "";
+    state.activeFilters.clear();
+    document.getElementById("searchInput").value = "";
+    document.getElementById("statusFilterSelect").value = "";
+    renderTeamRow();
+    renderGrid();
+    renderList();
+  });
 
   function renderAll(){
     renderWeekdayRow();
