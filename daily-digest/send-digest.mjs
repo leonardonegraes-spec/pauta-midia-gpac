@@ -257,6 +257,8 @@ async function main() {
   });
 
   const ctx = { byPersonWeek, byPersonFuture, weekDemandas, futureDemandas, planos, today };
+  const subjectDate = String(today.getDate()).padStart(2, "0") + "/" + String(today.getMonth() + 1).padStart(2, "0");
+  const subject = `ADEMICON I PAUTA DA MÍDIA - ${subjectDate}`;
 
   let sent = 0;
   for (const r of recipients) {
@@ -266,7 +268,7 @@ async function main() {
     await transporter.sendMail({
       from: `Pauta de Mídia GPAC <${gmailUser}>`,
       to: r.email,
-      subject: "ADEMICON I PAUTA DA MÍDIA",
+      subject,
       html,
     });
     console.log(`Enviado para ${r.person || "(sem pessoa)"} <${r.email}> — individual:${r.individual} team:${r.team} — ${weekCount} esta semana, ${futureCount} depois.`);
