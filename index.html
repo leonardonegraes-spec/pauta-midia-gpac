@@ -956,9 +956,13 @@ if (firebaseConfigured) {
   }
 
   function renderAuthList(){
+    var monthStart = state.year + "-" + pad(state.month+1) + "-01";
+    var monthEnd = state.year + "-" + pad(state.month+1) + "-" + pad(new Date(state.year, state.month+1, 0).getDate());
     var items = state.autorizacoes
       .map(function(a){ return { a: a, pend: authPendencias(a), info: authDeadlineInfo(a) }; })
-      .filter(function(x){ return x.pend.length > 0 && authPassesFilter(x.a); })
+      // Só entram pendências com prazo dentro do mês em exibição (nada antes do início nem depois do fim do mês).
+      .filter(function(x){ return x.pend.length > 0 && x.info && x.info.ref >= monthStart && x.info.ref <= monthEnd; })
+      .filter(function(x){ return authPassesFilter(x.a); })
       .sort(function(x,y){
         var xl = (x.info && x.info.late) ? 0 : 1, yl = (y.info && y.info.late) ? 0 : 1;
         if (xl !== yl) return xl - yl;
@@ -967,13 +971,13 @@ if (firebaseConfigured) {
       });
     var el = document.getElementById("authList");
     el.innerHTML = items.length ? items.map(function(x){ return renderAuthRow(x.a, x.pend, x.info); }).join("")
-      : '<div class="empty-note">'+(state.authSearch ? "Nenhuma pendência encontrada com esse filtro." : "Nenhuma pendência no momento.")+'</div>';
+      : '<div class="empty-note">'+(state.authSearch ? "Nenhuma pendência encontrada com esse filtro." : "Nenhuma pendência neste mês.")+'</div>';
     el.querySelectorAll(".auth-row").forEach(function(row){
       row.addEventListener("click", function(){ openAuthDetail(row.getAttribute("data-id")); });
     });
     var note = document.getElementById("authSyncNote");
     note.textContent = state.authSyncInfo
-      ? ("Última sincronização: " + new Date(state.authSyncInfo.lastSyncAt).toLocaleString("pt-BR") + " · " + items.length + " pendências de " + state.authSyncInfo.count + " registros")
+      ? ("Última sincronização: " + new Date(state.authSyncInfo.lastSyncAt).toLocaleString("pt-BR") + " · " + items.length + " pendências neste mês (de " + state.authSyncInfo.count + " registros na planilha)")
       : "Ainda sem sincronização.";
   }
 
@@ -1029,6 +1033,7 @@ if (firebaseConfigured) {
     renderTeamRow();
     renderStats();
     renderList();
+    if (state.view === "auth") renderAuthList();
   }
 
   // ---------------- Drag & drop ----------------
