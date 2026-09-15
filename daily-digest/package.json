@@ -1,0 +1,9 @@
+{
+  "name": "pauta-midia-daily-digest",
+  "private": true,
+  "type": "module",
+  "dependencies": {
+    "firebase-admin": "^12.6.0",
+    "nodemailer": "^6.9.15"
+  }
+}
