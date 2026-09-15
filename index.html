@@ -386,6 +386,7 @@
 
   /* ---------- Autorizações de mídia (pendências, planilha externa somente leitura) ---------- */
   .auth-view { display: flex; flex-direction: column; }
+  .auth-heading { font-size: 15px; font-weight: 700; margin-bottom: 14px; }
   .auth-filter-bar { display: flex; gap: 10px; margin-bottom: 14px; flex-wrap: wrap; }
   .auth-filter-bar input[type="text"] {
     flex: 1; min-width: 220px; background: var(--surface2); border: 1px solid var(--border); color: var(--text);
@@ -486,6 +487,7 @@
   <div class="pauta-list" id="listView" style="display:none"></div>
 
   <div class="auth-view" id="authView" style="display:none">
+    <div class="auth-heading">Pendências da planilha de autorizações deste mês</div>
     <div class="auth-filter-bar">
       <input type="text" id="authSearchInput" placeholder="🔍 Buscar por cliente, campanha, praça ou veículo..." />
     </div>
