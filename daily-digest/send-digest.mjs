@@ -1,11 +1,12 @@
-// Envia, uma vez por dia, um e-mail para cada pessoa do time com as pautas
-// pendentes atribuídas a ela — quantos dias faltam (ou quanto está atrasada).
-// Rodado pelo GitHub Actions (.github/workflows/daily-digest.yml); nunca precisa
-// da página aberta em lugar nenhum.
+// Envia, uma vez por dia, um e-mail para cada pessoa do time com as pautas dela
+// (atrasadas + desta semana) e, junto, um resumo do total do time. Rodado pelo
+// GitHub Actions (.github/workflows/daily-digest.yml); nunca precisa da página
+// aberta em lugar nenhum.
 
 import admin from "firebase-admin";
 import nodemailer from "nodemailer";
 
+const TEAM = ["Bella", "Eduardo", "Anna", "Leonardo", "Rejane"];
 const STATUS_LABEL = { pendente: "Pendente", producao: "Em produção", concluido: "Concluído" };
 
 function requireEnv(name) {
@@ -18,6 +19,23 @@ function todayAtMidnight() {
   const d = new Date();
   d.setHours(0, 0, 0, 0);
   return d;
+}
+
+function toIsoDate(d) {
+  return d.getFullYear() + "-" + String(d.getMonth() + 1).padStart(2, "0") + "-" + String(d.getDate()).padStart(2, "0");
+}
+
+function startOfWeekMonday(d) {
+  const wd = (d.getDay() + 6) % 7; // 0 = segunda
+  const r = new Date(d);
+  r.setDate(d.getDate() - wd);
+  return r;
+}
+
+function endOfWeekSunday(monday) {
+  const r = new Date(monday);
+  r.setDate(monday.getDate() + 6);
+  return r;
 }
 
 function daysDiff(dateStr, today) {
@@ -52,7 +70,10 @@ function escapeHtml(s) {
   return (s || "").replace(/[&<>"']/g, (c) => ({ "&": "&amp;", "<": "&lt;", ">": "&gt;", '"': "&quot;", "'": "&#39;" }[c]));
 }
 
-function buildEmailHtml(person, items, planos, today) {
+function buildIndividualHtml(person, items, planos, today) {
+  if (!items.length) {
+    return `<p style="color:#666B58;font-size:13px;">Nenhuma pendência sua até o fim desta semana. 🎉</p>`;
+  }
   const rows = items.map((d) => {
     const dias = daysDiff(d.date, today);
     const late = dias < 0 && d.status !== "concluido";
@@ -73,14 +94,66 @@ function buildEmailHtml(person, items, planos, today) {
         </td>
       </tr>`;
   }).join("");
+  return `<table style="width:100%;border-collapse:collapse;">${rows}</table>`;
+}
+
+function buildTeamSummaryHtml(weekDemandas, today) {
+  const byPerson = {};
+  TEAM.forEach((name) => { byPerson[name] = { pendente: 0, producao: 0, concluido: 0 }; });
+  byPerson["Não atribuído"] = { pendente: 0, producao: 0, concluido: 0 };
+
+  let atrasadas = 0;
+  weekDemandas.forEach((d) => {
+    const person = d.responsavel && byPerson[d.responsavel] ? d.responsavel : (d.responsavel ? d.responsavel : "Não atribuído");
+    if (!byPerson[person]) byPerson[person] = { pendente: 0, producao: 0, concluido: 0 };
+    const bucket = d.status === "concluido" ? "concluido" : d.status === "producao" ? "producao" : "pendente";
+    byPerson[person][bucket]++;
+    if (d.date < toIsoDate(today) && d.status !== "concluido") atrasadas++;
+  });
+
+  const rows = Object.keys(byPerson)
+    .filter((name) => TEAM.includes(name) || byPerson[name].pendente + byPerson[name].producao + byPerson[name].concluido > 0)
+    .map((name) => {
+      const c = byPerson[name];
+      return `
+        <tr>
+          <td style="padding:8px 10px;border-bottom:1px solid #E4E6DC;font-weight:700;color:#21241B;font-size:13px;">${escapeHtml(name)}</td>
+          <td style="padding:8px 10px;border-bottom:1px solid #E4E6DC;text-align:center;color:#666B58;font-size:13px;">${c.pendente}</td>
+          <td style="padding:8px 10px;border-bottom:1px solid #E4E6DC;text-align:center;color:#2160C4;font-size:13px;">${c.producao}</td>
+          <td style="padding:8px 10px;border-bottom:1px solid #E4E6DC;text-align:center;color:#1F7A3B;font-size:13px;">${c.concluido}</td>
+        </tr>`;
+    }).join("");
+
+  const totalAberto = weekDemandas.filter((d) => d.status !== "concluido").length;
+  const totalConcluido = weekDemandas.filter((d) => d.status === "concluido").length;
 
   return `
-  <div style="font-family:Arial,Helvetica,sans-serif;max-width:560px;margin:0 auto;">
-    <h2 style="color:#21241B;font-size:18px;">Sua pauta de hoje, ${escapeHtml(person)}</h2>
-    <p style="color:#666B58;font-size:13px;">
-      Você tem ${items.length} pauta${items.length === 1 ? "" : "s"} pendente${items.length === 1 ? "" : "s"}.
+    <h3 style="color:#21241B;font-size:15px;margin:22px 0 8px;">Total do time — esta semana</h3>
+    <p style="color:#666B58;font-size:12px;margin:0 0 10px;">
+      ${totalAberto} pauta${totalAberto === 1 ? "" : "s"} em aberto ·
+      ${atrasadas} atrasada${atrasadas === 1 ? "" : "s"} ·
+      ${totalConcluido} concluída${totalConcluido === 1 ? "" : "s"}
     </p>
-    <table style="width:100%;border-collapse:collapse;">${rows}</table>
+    <table style="width:100%;border-collapse:collapse;">
+      <tr>
+        <td style="padding:6px 10px;font-size:11px;color:#9BA089;text-transform:uppercase;">Pessoa</td>
+        <td style="padding:6px 10px;font-size:11px;color:#9BA089;text-transform:uppercase;text-align:center;">Pendente</td>
+        <td style="padding:6px 10px;font-size:11px;color:#9BA089;text-transform:uppercase;text-align:center;">Em produção</td>
+        <td style="padding:6px 10px;font-size:11px;color:#9BA089;text-transform:uppercase;text-align:center;">Concluído</td>
+      </tr>
+      ${rows}
+    </table>`;
+}
+
+function buildEmailHtml(person, personItems, weekDemandas, planos, today) {
+  return `
+  <div style="font-family:Arial,Helvetica,sans-serif;max-width:560px;margin:0 auto;">
+    <h2 style="color:#21241B;font-size:18px;margin-bottom:4px;">Sua pauta de hoje, ${escapeHtml(person)}</h2>
+    <p style="color:#666B58;font-size:13px;margin-top:0;">
+      Atrasadas + o que vence até domingo desta semana.
+    </p>
+    ${buildIndividualHtml(person, personItems, planos, today)}
+    ${buildTeamSummaryHtml(weekDemandas, today)}
     <p style="color:#9BA089;font-size:11px;margin-top:18px;">
       Board completo: https://leonardonegraes-spec.github.io/pauta-midia-gpac/
     </p>
@@ -105,11 +178,18 @@ async function main() {
   planosSnap.forEach((doc) => { planos[doc.id] = doc.data(); });
 
   const today = todayAtMidnight();
+  const weekEndIso = toIsoDate(endOfWeekSunday(startOfWeekMonday(today)));
+  const todayIso = toIsoDate(today);
+
+  const allDemandas = demandasSnap.docs.map((doc) => ({ id: doc.id, ...doc.data() }));
+
+  // Escopo do relatório: tudo que já está atrasado, mais o que vence até o fim desta semana.
+  const weekDemandas = allDemandas.filter((d) => d.date <= weekEndIso);
+
   const byPerson = {};
-  demandasSnap.forEach((doc) => {
-    const d = { id: doc.id, ...doc.data() };
-    if (d.status === "concluido") return; // só o que ainda precisa de atenção
-    if (!d.responsavel) return; // sem responsável não tem para quem mandar
+  weekDemandas.forEach((d) => {
+    if (d.status === "concluido") return; // a lista individual mostra só o que precisa de ação
+    if (!d.responsavel) return; // sem responsável não tem para quem mandar individualmente
     (byPerson[d.responsavel] = byPerson[d.responsavel] || []).push(d);
   });
 
@@ -119,21 +199,19 @@ async function main() {
   });
 
   let sent = 0;
-  for (const [person, items] of Object.entries(byPerson)) {
-    const email = teamEmails[person];
-    if (!email) { console.warn(`Sem e-mail cadastrado para "${person}" — pulando.`); continue; }
-    items.sort((a, b) => a.date.localeCompare(b.date));
-    const html = buildEmailHtml(person, items, planos, today);
+  for (const [person, email] of Object.entries(teamEmails)) {
+    const items = (byPerson[person] || []).sort((a, b) => a.date.localeCompare(b.date));
+    const html = buildEmailHtml(person, items, weekDemandas, planos, today);
     await transporter.sendMail({
       from: `Pauta de Mídia GPAC <${gmailUser}>`,
       to: email,
-      subject: `📋 Sua pauta de hoje — ${items.length} pendente${items.length === 1 ? "" : "s"}`,
+      subject: `📋 Sua pauta da semana — ${items.length} pendente${items.length === 1 ? "" : "s"} + total do time`,
       html,
     });
-    console.log(`Enviado para ${person} <${email}> — ${items.length} pauta(s).`);
+    console.log(`Enviado para ${person} <${email}> — ${items.length} pauta(s) individual(is).`);
     sent++;
   }
-  console.log(`Concluído. ${sent} e-mail(s) enviado(s).`);
+  console.log(`Concluído. ${sent} e-mail(s) enviado(s). Escopo: até ${weekEndIso} (hoje ${todayIso}).`);
 }
 
 main().catch((e) => { console.error(e); process.exit(1); });
