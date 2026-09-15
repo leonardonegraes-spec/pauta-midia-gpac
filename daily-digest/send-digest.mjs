@@ -66,6 +66,14 @@ function campanhaPracas(d, planos) {
   return planos[d.planoKey] ? planos[d.planoKey].pracas : [];
 }
 
+// Uma pauta pode ter mais de uma pessoa (mesma lógica do app). Docs antigos só
+// tinham "responsavel" (string única) — continuam funcionando normalmente.
+function getResponsaveis(d) {
+  if (d.responsaveis && d.responsaveis.length) return d.responsaveis;
+  if (d.responsavel) return [d.responsavel];
+  return [];
+}
+
 function escapeHtml(s) {
   return (s || "").replace(/[&<>"']/g, (c) => ({ "&": "&amp;", "<": "&lt;", ">": "&gt;", '"': "&quot;", "'": "&#39;" }[c]));
 }
@@ -124,9 +132,12 @@ function buildTeamSummaryHtml(weekDemandas, planos) {
   weekDemandas.forEach((d) => {
     if (d.status === "concluido") return; // total do time não mostra concluído
     const bucket = d.status === "producao" ? "producao" : "pendente";
-    if (d.responsavel) {
-      if (!byPerson[d.responsavel]) byPerson[d.responsavel] = { pendente: [], producao: [] };
-      byPerson[d.responsavel][bucket].push(d);
+    const resp = getResponsaveis(d);
+    if (resp.length) {
+      resp.forEach((person) => {
+        if (!byPerson[person]) byPerson[person] = { pendente: [], producao: [] };
+        byPerson[person][bucket].push(d);
+      });
     } else {
       unassigned[bucket].push(d);
     }
@@ -150,25 +161,37 @@ function buildTeamSummaryHtml(weekDemandas, planos) {
     ${sections}`;
 }
 
-function buildEmailHtml(person, personItems, weekDemandas, planos, today) {
-  return `
-  <div style="font-family:Arial,Helvetica,sans-serif;max-width:600px;margin:0 auto;padding:28px 24px;background:#FAFAF7;">
-    <h2 style="color:#21241B;font-size:19px;margin:0 0 6px;">Sua pauta de hoje, ${escapeHtml(person)}</h2>
-    <p style="color:#666B58;font-size:13px;margin:0 0 20px;line-height:1.6;">
-      Atrasadas + o que vence até domingo desta semana.
-    </p>
-    ${buildIndividualHtml(person, personItems, planos, today)}
-    <div style="border-top:1px solid #E4E6DC;margin:32px 0 24px;"></div>
-    ${buildTeamSummaryHtml(weekDemandas, planos)}
+// recipient: { email, person: string|null, individual: bool, team: bool }
+function buildEmailHtml(recipient, personItems, weekDemandas, planos, today) {
+  const blocks = [];
+  if (recipient.individual && recipient.person) {
+    blocks.push(`
+      <h2 style="color:#21241B;font-size:19px;margin:0 0 6px;">Sua pauta da semana, ${escapeHtml(recipient.person)}</h2>
+      <p style="color:#666B58;font-size:13px;margin:0 0 20px;line-height:1.6;">
+        Atrasadas + o que vence até domingo desta semana.
+      </p>
+      ${buildIndividualHtml(recipient.person, personItems, planos, today)}
+    `);
+  }
+  if (recipient.individual && recipient.team) {
+    blocks.push(`<div style="border-top:1px solid #E4E6DC;margin:32px 0 24px;"></div>`);
+  }
+  if (recipient.team) {
+    if (!recipient.individual) {
+      blocks.push(`<h2 style="color:#21241B;font-size:19px;margin:0 0 6px;">Pauta da semana — Total do time</h2><p style="color:#666B58;font-size:13px;margin:0 0 20px;line-height:1.6;">Atrasadas + o que vence até domingo desta semana, por pessoa.</p>`);
+    }
+    blocks.push(buildTeamSummaryHtml(weekDemandas, planos));
+  }
+  blocks.push(`
     <p style="color:#9BA089;font-size:11px;margin-top:24px;">
       Board completo: https://leonardonegraes-spec.github.io/pauta-midia-gpac/
-    </p>
-  </div>`;
+    </p>`);
+  return `<div style="font-family:Arial,Helvetica,sans-serif;max-width:600px;margin:0 auto;padding:28px 24px;background:#FAFAF7;">${blocks.join("")}</div>`;
 }
 
 async function main() {
   const serviceAccount = JSON.parse(requireEnv("FIREBASE_SERVICE_ACCOUNT"));
-  const teamEmails = JSON.parse(requireEnv("TEAM_EMAILS"));
+  const recipients = JSON.parse(requireEnv("TEAM_EMAILS")); // array de {email, person, individual, team}
   const gmailUser = requireEnv("GMAIL_USER");
   const gmailAppPassword = requireEnv("GMAIL_APP_PASSWORD");
 
@@ -195,8 +218,9 @@ async function main() {
   const byPerson = {};
   weekDemandas.forEach((d) => {
     if (d.status === "concluido") return; // a lista individual mostra só o que precisa de ação
-    if (!d.responsavel) return; // sem responsável não tem para quem mandar individualmente
-    (byPerson[d.responsavel] = byPerson[d.responsavel] || []).push(d);
+    getResponsaveis(d).forEach((person) => {
+      (byPerson[person] = byPerson[person] || []).push(d);
+    });
   });
 
   const transporter = nodemailer.createTransport({
@@ -205,16 +229,16 @@ async function main() {
   });
 
   let sent = 0;
-  for (const [person, email] of Object.entries(teamEmails)) {
-    const items = (byPerson[person] || []).sort((a, b) => a.date.localeCompare(b.date));
-    const html = buildEmailHtml(person, items, weekDemandas, planos, today);
+  for (const r of recipients) {
+    const items = r.person ? (byPerson[r.person] || []).sort((a, b) => a.date.localeCompare(b.date)) : [];
+    const html = buildEmailHtml(r, items, weekDemandas, planos, today);
     await transporter.sendMail({
       from: `Pauta de Mídia GPAC <${gmailUser}>`,
-      to: email,
-      subject: `📋 Sua pauta da semana — ${items.length} pendente${items.length === 1 ? "" : "s"} + total do time`,
+      to: r.email,
+      subject: "ADEMICON I PAUTA DA MÍDIA",
       html,
     });
-    console.log(`Enviado para ${person} <${email}> — ${items.length} pauta(s) individual(is).`);
+    console.log(`Enviado para ${r.person || "(sem pessoa)"} <${r.email}> — individual:${r.individual} team:${r.team} — ${items.length} pauta(s) individual(is).`);
     sent++;
   }
   console.log(`Concluído. ${sent} e-mail(s) enviado(s). Escopo: até ${weekEndIso} (hoje ${todayIso}).`);
