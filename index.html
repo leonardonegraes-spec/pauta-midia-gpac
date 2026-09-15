@@ -129,6 +129,18 @@
   .chip:hover { border-color: var(--border-strong); }
   .chip.unassigned .avatar { background: var(--surface3); border: 1px dashed var(--text3); }
 
+  /* ---------- Multi-select de responsáveis ---------- */
+  .resp-checks { display: flex; flex-wrap: wrap; gap: 8px; }
+  .resp-check {
+    display: inline-flex; align-items: center; gap: 6px; font-size: 12.5px; color: var(--text);
+    cursor: pointer; background: var(--surface2); border: 1px solid var(--border); border-radius: 20px;
+    padding: 6px 12px 6px 8px; user-select: none;
+  }
+  .resp-check:hover { border-color: var(--border-strong); }
+  .resp-check input { margin: 0; }
+  .resp-check .dot { width: 10px; height: 10px; border-radius: 50%; flex: none; }
+  .avatar-stack { display: flex; gap: 3px; flex: none; }
+
   /* ---------- Filter bar ---------- */
   .filter-bar { display: flex; gap: 10px; margin-bottom: 18px; flex-wrap: wrap; }
   .filter-bar input[type="text"] {
@@ -181,7 +193,7 @@
     color: var(--text2); overflow: hidden; text-overflow: ellipsis; white-space: nowrap; max-width: 360px;
   }
   .pauta-row .pl-resp {
-    flex: none; font-size: 12px; color: var(--text2); font-weight: 600; min-width: 78px; white-space: nowrap;
+    flex: none; font-size: 12px; color: var(--text2); font-weight: 600; max-width: 150px; text-align: right;
   }
 
   /* ---------- Calendar grid ---------- */
@@ -461,8 +473,8 @@
       <input id="fPracas" type="text" placeholder="Ex: Curitiba, Guaratuba, Matinhos" />
     </div>
     <div class="field">
-      <label for="fResp">Responsável</label>
-      <select id="fResp"><option value="">Não atribuído</option></select>
+      <label>Responsável (pode escolher mais de um)</label>
+      <div class="resp-checks" id="respChecks"></div>
     </div>
     <div class="field">
       <label for="fNotas">Notas</label>
@@ -598,6 +610,20 @@ if (firebaseConfigured) {
     return m ? m.pracas : [];
   }
 
+  // Responsáveis agora é uma lista (pode ter mais de uma pessoa). Docs antigos só
+  // tinham "responsavel" (string única) — continuam funcionando normalmente.
+  function getResponsaveis(d){
+    if (d.responsaveis && d.responsaveis.length) return d.responsaveis;
+    if (d.responsavel) return [d.responsavel];
+    return [];
+  }
+  function renderAvatars(resp){
+    if (!resp.length) return '<div class="mini-avatar none"></div>';
+    return resp.map(function(name){
+      return '<div class="mini-avatar" style="background:'+teamColor(name)+'" title="'+escapeHtml(name)+'">'+initials(name)+'</div>';
+    }).join("");
+  }
+
   // ---------------- State ----------------
   var state = {
     year: 2026, month: 8, // September 2026 (0-indexed)
@@ -642,26 +668,26 @@ if (firebaseConfigured) {
   }
 
   function passesFilter(d){
+    var resp = getResponsaveis(d);
     if (state.activeFilters.size > 0) {
-      var key = d.responsavel || "__none__";
-      if (!state.activeFilters.has(key)) return false;
+      var matched = resp.length ? resp.some(function(r){ return state.activeFilters.has(r); }) : state.activeFilters.has("__none__");
+      if (!matched) return false;
     }
     if (state.statusFilter && d.status !== state.statusFilter) return false;
     if (state.searchQuery) {
       var q = state.searchQuery.trim().toLowerCase();
-      var hay = [d.title, campanhaLabel(d), campanhaPracas(d).join(" "), d.responsavel || ""].join(" ").toLowerCase();
+      var hay = [d.title, campanhaLabel(d), campanhaPracas(d).join(" "), resp.join(" ")].join(" ").toLowerCase();
       if (hay.indexOf(q) === -1) return false;
     }
     return true;
   }
 
   function renderCard(d){
-    var color = teamColor(d.responsavel);
+    var resp = getResponsaveis(d);
+    var color = resp.length ? teamColor(resp[0]) : null;
     var pracas = campanhaPracas(d);
     var planoLabel = campanhaLabel(d) || (pracas.length ? pracas.slice(0,2).join(", ") + (pracas.length>2 ? " +"+(pracas.length-2) : "") : "");
-    var avatarHtml = d.responsavel
-      ? '<div class="mini-avatar" style="background:'+color+'">'+initials(d.responsavel)+'</div>'
-      : '<div class="mini-avatar none"></div>';
+    var avatarHtml = '<div class="avatar-stack">'+renderAvatars(resp)+'</div>';
     var statusBadgeClass = d.status === "concluido" ? "badge-concluido" : (d.status === "producao" ? "badge-producao" : "badge-pendente");
     var statusText = d.status === "concluido" ? "Concluído" : (d.status === "producao" ? "Em produção" : "Pendente");
     return '<div class="card" draggable="true" data-id="'+d.id+'" style="border-left-color:'+(color||"var(--text3)")+'">'
@@ -696,7 +722,11 @@ if (firebaseConfigured) {
     var el = document.getElementById("teamRow");
     var monthDemandas = state.demandas.filter(function(d){ return d.date.slice(0,7) === state.year + "-" + pad(state.month+1); });
     var counts = {};
-    monthDemandas.forEach(function(d){ var k = d.responsavel || "__none__"; counts[k] = (counts[k]||0)+1; });
+    monthDemandas.forEach(function(d){
+      var resp = getResponsaveis(d);
+      if (!resp.length) { counts["__none__"] = (counts["__none__"]||0)+1; return; }
+      resp.forEach(function(k){ counts[k] = (counts[k]||0)+1; });
+    });
     var html = '<span class="label">Time</span>';
     TEAM.forEach(function(m){
       var active = state.activeFilters.has(m.key) ? " active" : "";
@@ -721,7 +751,7 @@ if (firebaseConfigured) {
     var monthKey = state.year + "-" + pad(state.month+1);
     var monthDemandas = state.demandas.filter(function(d){ return d.date.slice(0,7) === monthKey; });
     var today = todayIso();
-    var unassigned = monthDemandas.filter(function(d){ return !d.responsavel; }).length;
+    var unassigned = monthDemandas.filter(function(d){ return !getResponsaveis(d).length; }).length;
     var late = monthDemandas.filter(function(d){ return d.date < today && d.status !== "concluido"; }).length;
     var done = monthDemandas.filter(function(d){ return d.status === "concluido"; }).length;
     document.getElementById("statTotal").textContent = monthDemandas.length;
@@ -733,14 +763,12 @@ if (firebaseConfigured) {
   function renderPautaRow(d){
     var today = todayIso();
     var late = d.date < today && d.status !== "concluido";
-    var color = teamColor(d.responsavel);
+    var resp = getResponsaveis(d);
     var planoLabel = campanhaLabel(d);
     var pracas = campanhaPracas(d).join(", ");
     var statusBadgeClass = d.status === "concluido" ? "badge-concluido" : (d.status === "producao" ? "badge-producao" : "badge-pendente");
     var statusText = d.status === "concluido" ? "Concluído" : (d.status === "producao" ? "Em produção" : "Pendente");
-    var avatarHtml = d.responsavel
-      ? '<div class="mini-avatar" style="background:'+color+'">'+initials(d.responsavel)+'</div>'
-      : '<div class="mini-avatar none"></div>';
+    var avatarHtml = '<div class="avatar-stack">'+renderAvatars(resp)+'</div>';
     return '<div class="pauta-row" data-id="'+d.id+'">'
       + '<div class="pl-date'+(late?" late":"")+'">'+formatDateLong(d.date)+'</div>'
       + avatarHtml
@@ -748,7 +776,7 @@ if (firebaseConfigured) {
         + '<div class="pl-title">'+escapeHtml(d.title)+'</div>'
         + '<div class="pl-meta">'+(planoLabel ? '<span class="pl-plano">'+escapeHtml(planoLabel)+'</span>' : '')+(pracas ? '<span class="pl-pracas">'+escapeHtml(pracas)+'</span>' : '')+'</div>'
       + '</div>'
-      + '<div class="pl-resp">'+escapeHtml(d.responsavel || "Não atribuído")+'</div>'
+      + '<div class="pl-resp">'+escapeHtml(resp.length ? resp.join(", ") : "Não atribuído")+'</div>'
       + '<div class="status-badge '+statusBadgeClass+'">'+statusText+'</div>'
       + '</div>';
   }
@@ -852,9 +880,19 @@ if (firebaseConfigured) {
   function populateSelects(){
     var planoOptions = document.getElementById("planoOptions");
     planoOptions.innerHTML = Object.keys(state.planos).map(function(k){ return '<option value="'+escapeHtml(state.planos[k].nome)+'"></option>'; }).join("");
-    var respSel = document.getElementById("fResp");
-    respSel.innerHTML = '<option value="">Não atribuído</option>' +
-      TEAM.map(function(m){ return '<option value="'+m.key+'">'+m.key+'</option>'; }).join("");
+    var respChecks = document.getElementById("respChecks");
+    respChecks.innerHTML = TEAM.map(function(m){
+      return '<label class="resp-check"><input type="checkbox" value="'+m.key+'" /><span class="dot" style="background:'+m.color+'"></span>'+m.key+'</label>';
+    }).join("");
+  }
+
+  function setRespChecks(resp){
+    document.querySelectorAll('#respChecks input[type="checkbox"]').forEach(function(cb){
+      cb.checked = resp.indexOf(cb.value) !== -1;
+    });
+  }
+  function getRespChecks(){
+    return Array.from(document.querySelectorAll('#respChecks input[type="checkbox"]:checked')).map(function(cb){ return cb.value; });
   }
 
   function openModal(id, presetDate){
@@ -869,7 +907,7 @@ if (firebaseConfigured) {
       document.getElementById("fStatus").value = "pendente";
       document.getElementById("fPlano").value = "";
       document.getElementById("fPracas").value = "";
-      document.getElementById("fResp").value = "";
+      setRespChecks([]);
       document.getElementById("fNotas").value = "";
     } else {
       var d = state.demandas.filter(function(x){ return x.id === id; })[0];
@@ -879,7 +917,7 @@ if (firebaseConfigured) {
       document.getElementById("fStatus").value = d.status || "pendente";
       document.getElementById("fPlano").value = campanhaLabel(d);
       document.getElementById("fPracas").value = campanhaPracas(d).join(", ");
-      document.getElementById("fResp").value = d.responsavel || "";
+      setRespChecks(getResponsaveis(d));
       document.getElementById("fNotas").value = d.notas || "";
     }
     overlay.classList.add("show");
@@ -910,7 +948,8 @@ if (firebaseConfigured) {
       status: document.getElementById("fStatus").value,
       planoKey: document.getElementById("fPlano").value.trim(),
       pracas: pracasRaw ? pracasRaw.split(",").map(function(s){ return s.trim(); }).filter(Boolean) : [],
-      responsavel: document.getElementById("fResp").value,
+      responsaveis: getRespChecks(),
+      responsavel: getRespChecks()[0] || "",
       notas: document.getElementById("fNotas").value.trim()
     };
     if (state.editingId) {
@@ -1076,7 +1115,10 @@ if (firebaseConfigured) {
 
   function personDemandas(key){
     return state.demandas
-      .filter(function(d){ return (d.responsavel || "__none__") === key; })
+      .filter(function(d){
+        var resp = getResponsaveis(d);
+        return resp.length ? resp.indexOf(key) !== -1 : key === "__none__";
+      })
       .sort(function(a,b){ return a.date.localeCompare(b.date); });
   }
 
