@@ -287,6 +287,7 @@
   .praca-preview { font-size: 11.5px; color: var(--text2); margin-top: 5px; line-height: 1.5; }
   .modal-actions { display: flex; justify-content: space-between; align-items: center; margin-top: 18px; gap: 10px; }
   .modal-actions .right { display: flex; gap: 8px; }
+  .modal-actions .left { display: flex; gap: 8px; }
 
   /* ---------- Reference drawer ---------- */
   .drawer-overlay {
@@ -476,6 +477,7 @@
   <div class="view-switch">
     <button class="view-btn active" id="btnViewCalendar">📅 Calendário</button>
     <button class="view-btn" id="btnViewList">📋 Pauta em lista</button>
+    <button class="view-btn" id="btnViewDone">✅ Concluídos</button>
     <button class="view-btn" id="btnViewAuth">🗂️ Autorizações de mídia</button>
   </div>
 
@@ -485,6 +487,8 @@
   </div>
 
   <div class="pauta-list" id="listView" style="display:none"></div>
+
+  <div class="pauta-list" id="doneView" style="display:none"></div>
 
   <div class="auth-view" id="authView" style="display:none">
     <div class="auth-heading">Pendências da planilha de autorizações deste mês</div>
@@ -540,10 +544,31 @@
       <textarea id="fNotas" placeholder="Observações, links, contexto, briefing, skills..."></textarea>
     </div>
     <div class="modal-actions">
-      <button class="btn danger ghost small" id="btnDelete" style="display:none">Excluir</button>
+      <div class="left">
+        <button class="btn danger ghost small" id="btnDelete" style="display:none">Excluir</button>
+        <button class="btn ghost small" id="btnDuplicate" style="display:none">⧉ Duplicar</button>
+      </div>
       <div class="right">
         <button class="btn ghost" id="btnCancel">Cancelar</button>
         <button class="btn primary" id="btnSave">Salvar</button>
+      </div>
+    </div>
+  </div>
+</div>
+
+<!-- Duplicar pauta -->
+<div class="overlay" id="dupOverlay">
+  <div class="modal" style="max-width:360px">
+    <h2>Duplicar pauta<button class="close" id="dupClose">✕</button></h2>
+    <div class="field">
+      <label for="fDupDate">Nova data</label>
+      <input id="fDupDate" type="date" />
+    </div>
+    <div class="modal-actions">
+      <div></div>
+      <div class="right">
+        <button class="btn ghost" id="dupCancel">Cancelar</button>
+        <button class="btn primary" id="dupConfirm">Duplicar</button>
       </div>
     </div>
   </div>
@@ -727,8 +752,12 @@ if (firebaseConfigured) {
     }).join("");
   }
 
+  function activeDemandas(){
+    return state.demandas.filter(function(d){ return d.status !== "concluido"; });
+  }
+
   function demandasFor(dateIso){
-    return state.demandas.filter(function(d){ return d.date === dateIso; });
+    return activeDemandas().filter(function(d){ return d.date === dateIso; });
   }
 
   function passesFilter(d){
@@ -814,13 +843,14 @@ if (firebaseConfigured) {
 
   function renderStats(){
     var monthKey = state.year + "-" + pad(state.month+1);
-    var monthDemandas = state.demandas.filter(function(d){ return d.date.slice(0,7) === monthKey; });
+    var monthDemandasAll = state.demandas.filter(function(d){ return d.date.slice(0,7) === monthKey; });
+    var monthDemandas = monthDemandasAll.filter(function(d){ return d.status !== "concluido"; });
     var today = todayIso();
     var unassigned = monthDemandas.filter(function(d){ return !getResponsaveis(d).length; }).length;
-    var late = monthDemandas.filter(function(d){ return d.date < today && d.status !== "concluido"; }).length;
-    var done = monthDemandas.filter(function(d){ return d.status === "concluido"; }).length;
+    var late = monthDemandas.filter(function(d){ return d.date < today; }).length;
+    var done = monthDemandasAll.filter(function(d){ return d.status === "concluido"; }).length;
     document.getElementById("statTotal").textContent = monthDemandas.length;
-    document.getElementById("statGrandTotal").textContent = state.demandas.length;
+    document.getElementById("statGrandTotal").textContent = activeDemandas().length;
     document.getElementById("statUnassigned").textContent = unassigned;
     document.getElementById("statLate").textContent = late;
     document.getElementById("statDone").textContent = done;
@@ -851,8 +881,9 @@ if (firebaseConfigured) {
   function renderList(){
     var monthKey = state.year + "-" + pad(state.month+1);
     var hasActiveFilters = state.activeFilters.size > 0 || !!state.statusFilter || !!state.searchQuery;
-    // Com algum filtro ativo, busca em todo o histórico (não só no mês em exibição).
-    var scope = hasActiveFilters ? state.demandas : state.demandas.filter(function(d){ return d.date.slice(0,7) === monthKey; });
+    // Com algum filtro ativo, busca em todo o histórico (não só no mês em exibição). Concluídas ficam na aba própria.
+    var base = activeDemandas();
+    var scope = hasActiveFilters ? base : base.filter(function(d){ return d.date.slice(0,7) === monthKey; });
     var items = scope
       .filter(passesFilter)
       .sort(function(a,b){ return a.date.localeCompare(b.date); });
@@ -864,22 +895,54 @@ if (firebaseConfigured) {
     });
   }
 
+  // Aba de histórico: tudo que já foi concluído, para não sumir mas também não poluir a pauta ativa.
+  function renderDoneList(){
+    var hasFilters = state.activeFilters.size > 0 || !!state.searchQuery;
+    var items = state.demandas
+      .filter(function(d){ return d.status === "concluido"; })
+      .filter(function(d){
+        var resp = getResponsaveis(d);
+        if (state.activeFilters.size > 0) {
+          var matched = resp.length ? resp.some(function(r){ return state.activeFilters.has(r); }) : state.activeFilters.has("__none__");
+          if (!matched) return false;
+        }
+        if (state.searchQuery) {
+          var q = state.searchQuery.trim().toLowerCase();
+          var hay = [d.title, campanhaLabel(d), campanhaPracas(d).join(" "), resp.join(" ")].join(" ").toLowerCase();
+          if (hay.indexOf(q) === -1) return false;
+        }
+        return true;
+      })
+      .sort(function(a,b){ return b.date.localeCompare(a.date); });
+    var el = document.getElementById("doneView");
+    el.innerHTML = items.length ? items.map(renderPautaRow).join("")
+      : '<div class="empty-note">'+(hasFilters ? "Nenhuma pauta concluída encontrada com esse filtro." : "Nenhuma pauta concluída ainda.")+'</div>';
+    el.querySelectorAll(".pauta-row").forEach(function(row){
+      row.addEventListener("click", function(){ openModal(row.getAttribute("data-id")); });
+    });
+  }
+
   function setView(view){
     state.view = view;
     document.getElementById("btnViewCalendar").classList.toggle("active", view === "calendar");
     document.getElementById("btnViewList").classList.toggle("active", view === "list");
+    document.getElementById("btnViewDone").classList.toggle("active", view === "done");
     document.getElementById("btnViewAuth").classList.toggle("active", view === "auth");
     document.getElementById("calendarView").style.display = view === "calendar" ? "" : "none";
     document.getElementById("listView").style.display = view === "list" ? "" : "none";
+    document.getElementById("doneView").style.display = view === "done" ? "" : "none";
     document.getElementById("authView").style.display = view === "auth" ? "" : "none";
-    var pautaMode = view !== "auth";
-    document.querySelector(".stats").style.display = pautaMode ? "" : "none";
-    document.getElementById("teamRow").style.display = pautaMode ? "" : "none";
-    document.querySelector(".filter-bar").style.display = pautaMode ? "" : "none";
+    var statsMode = (view === "calendar" || view === "list");
+    document.querySelector(".stats").style.display = statsMode ? "" : "none";
+    document.getElementById("teamRow").style.display = statsMode ? "" : "none";
+    document.querySelector(".filter-bar").style.display = (view !== "auth") ? "" : "none";
+    document.querySelector(".monthbar").style.display = (view !== "done") ? "" : "none";
     if (view === "auth") renderAuthList();
+    if (view === "done") renderDoneList();
   }
   document.getElementById("btnViewCalendar").addEventListener("click", function(){ setView("calendar"); });
   document.getElementById("btnViewList").addEventListener("click", function(){ setView("list"); });
+  document.getElementById("btnViewDone").addEventListener("click", function(){ setView("done"); });
   document.getElementById("btnViewAuth").addEventListener("click", function(){ setView("auth"); });
 
   // ---------------- Autorizações de mídia — pendências (planilha externa, somente leitura) ----------------
@@ -1012,6 +1075,7 @@ if (firebaseConfigured) {
     state.searchQuery = this.value;
     renderGrid();
     renderList();
+    renderDoneList();
   });
   document.getElementById("statusFilterSelect").addEventListener("change", function(){
     state.statusFilter = this.value;
@@ -1027,6 +1091,7 @@ if (firebaseConfigured) {
     renderTeamRow();
     renderGrid();
     renderList();
+    renderDoneList();
   });
 
   function renderAll(){
@@ -1036,6 +1101,7 @@ if (firebaseConfigured) {
     renderStats();
     renderList();
     if (state.view === "auth") renderAuthList();
+    if (state.view === "done") renderDoneList();
   }
 
   // ---------------- Drag & drop ----------------
@@ -1110,6 +1176,7 @@ if (firebaseConfigured) {
     var isNew = !id;
     document.getElementById("modalTitleLabel").textContent = isNew ? "Nova pauta" : "Editar pauta";
     document.getElementById("btnDelete").style.display = isNew ? "none" : "inline-block";
+    document.getElementById("btnDuplicate").style.display = isNew ? "none" : "inline-block";
     if (isNew) {
       document.getElementById("fTitle").value = "";
       document.getElementById("fCreatedAt").value = todayIso();
@@ -1146,7 +1213,48 @@ if (firebaseConfigured) {
   document.getElementById("modalClose").addEventListener("click", closeModal);
   document.getElementById("btnCancel").addEventListener("click", closeModal);
   overlay.addEventListener("click", function(e){ if (e.target === overlay) closeModal(); });
-  document.addEventListener("keydown", function(e){ if (e.key === "Escape") { closeModal(); closeDrawer(); closeRefModal(); } });
+  document.addEventListener("keydown", function(e){ if (e.key === "Escape") { closeDuplicateModal(); closeModal(); closeDrawer(); closeRefModal(); } });
+
+  // ---------------- Duplicar pauta (copia para outra data/mês) ----------------
+  var dupOverlay = document.getElementById("dupOverlay");
+  function openDuplicateModal(){
+    if (!state.editingId) return;
+    var d = state.demandas.filter(function(x){ return x.id === state.editingId; })[0];
+    if (!d) return;
+    var base = parseIso(d.date);
+    var target = new Date(base.getFullYear(), base.getMonth()+1, base.getDate());
+    document.getElementById("fDupDate").value = iso(target);
+    dupOverlay.classList.add("show");
+  }
+  function closeDuplicateModal(){ dupOverlay.classList.remove("show"); }
+  document.getElementById("btnDuplicate").addEventListener("click", openDuplicateModal);
+  document.getElementById("dupClose").addEventListener("click", closeDuplicateModal);
+  document.getElementById("dupCancel").addEventListener("click", closeDuplicateModal);
+  dupOverlay.addEventListener("click", function(e){ if (e.target === dupOverlay) closeDuplicateModal(); });
+  document.getElementById("dupConfirm").addEventListener("click", function(){
+    var d = state.demandas.filter(function(x){ return x.id === state.editingId; })[0];
+    if (!d) return;
+    var newDate = document.getElementById("fDupDate").value;
+    if (!newDate) return;
+    var payload = {
+      title: d.title,
+      date: newDate,
+      createdAt: d.createdAt || todayIso(),
+      status: d.status || "pendente",
+      planoKey: d.planoKey || "",
+      pracas: campanhaPracas(d).slice(),
+      responsaveis: getResponsaveis(d).slice(),
+      responsavel: getResponsaveis(d)[0] || "",
+      notas: d.notas || ""
+    };
+    var id = "d-" + Date.now() + "-" + Math.random().toString(36).slice(2,7);
+    var newDoc = Object.assign({ id: id }, payload);
+    state.demandas.push(newDoc);
+    persistCreate(id, payload);
+    closeDuplicateModal();
+    closeModal();
+    renderAll();
+  });
 
   document.getElementById("btnSave").addEventListener("click", function(){
     var title = document.getElementById("fTitle").value.trim();
@@ -1357,16 +1465,17 @@ if (firebaseConfigured) {
     var isNone = key === "__none__";
     var name = isNone ? "Não atribuído" : key;
     var items = personDemandas(key);
+    var openItems = items.filter(function(d){ return d.status !== "concluido"; });
     var today = todayIso();
-    var late = items.filter(function(d){ return d.date < today && d.status !== "concluido"; }).length;
+    var late = openItems.filter(function(d){ return d.date < today; }).length;
     var done = items.filter(function(d){ return d.status === "concluido"; }).length;
     var statsHtml = '<div class="person-stats">'
-      + '<div class="ps"><b>'+items.length+'</b>total</div>'
+      + '<div class="ps"><b>'+openItems.length+'</b>total</div>'
       + '<div class="ps late-c"><b>'+late+'</b>atrasadas</div>'
       + '<div class="ps done-c"><b>'+done+'</b>concluídas</div>'
       + '</div>';
     var filterBtn = '<button class="btn small ghost" id="btnFilterPerson" style="margin-top:10px;width:100%">Filtrar calendário nesta pessoa</button>';
-    var listHtml = items.length ? items.map(renderPersonRow).join("") : '<div class="empty-note">Nenhuma pauta atribuída ainda.</div>';
+    var listHtml = openItems.length ? openItems.map(renderPersonRow).join("") : '<div class="empty-note">Nenhuma pauta em aberto atribuída.</div>';
     var sub = isNone ? "Pautas ainda sem responsável definido." : "Agenda de demandas e prazos.";
     openDrawer(name, sub, statsHtml + filterBtn + '<div style="margin-top:14px">' + listHtml + '</div>');
     document.querySelectorAll(".person-row").forEach(function(row){
