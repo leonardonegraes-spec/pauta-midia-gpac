@@ -6,7 +6,7 @@
 import admin from "firebase-admin";
 import nodemailer from "nodemailer";
 
-const TEAM = ["Bella", "Eduardo", "Anna", "Leonardo", "Rejane"];
+const TEAM = ["Bella", "Eduardo", "Anna", "Leonardo", "Rejane", "Dutra", "Gui"];
 const STATUS_LABEL = { pendente: "Pendente", producao: "Em produção", concluido: "Concluído" };
 
 function requireEnv(name) {
